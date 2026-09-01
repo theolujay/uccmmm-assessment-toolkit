@@ -1,0 +1,12 @@
+{
+  "name": "uccmmm-assessment-toolkit",
+  "private": true,
+  "packageManager": "pnpm@10.30.2",
+  "scripts": {
+    "dev": "pnpm --parallel --filter @assessment/web --filter @assessment/api dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck"
+  }
+}
