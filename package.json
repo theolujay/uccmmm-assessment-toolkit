@@ -1,6 +1,7 @@
 {
   "name": "uccmmm-assessment-toolkit",
   "private": true,
+  "type": "module",
   "packageManager": "pnpm@11.25.0",
   "scripts": {
     "dev": "pnpm --parallel --filter @assessment/web dev",
@@ -8,5 +9,10 @@
     "lint": "pnpm -r lint",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.34.0",
+    "eslint": "^9.34.0",
+    "typescript-eslint": "^8.41.0"
   }
 }
