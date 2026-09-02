@@ -1,0 +1,7 @@
+export type MaturityLevel = 'Initial' | 'Developing' | 'Defined' | 'Optimising';
+export interface AssessmentQuestion { id: string; prompt: string; required: boolean; }
+export interface AssessmentDimension { id: string; name: string; shortName: string; questions: AssessmentQuestion[]; }
+export const assessmentTemplate = { id: 'uc-cmmm-v1', name: 'UC-CMMM Maturity Assessment', dimensions: [['leadership', 'Leadership, Governance & Strategy', 'Leadership'], ['communication', 'Communication and Stakeholder Engagement', 'Communication'], ['requirements', 'Requirements and Process Alignment', 'Requirements'], ['readiness', 'Organisational and User Readiness', 'Readiness'], ['training', 'Training, Support, and User Experience', 'Training'], ['resilience', 'Contextual Resilience and Continuous Improvement', 'Resilience']].map(([id, name, shortName]) => ({ id, name, shortName, questions: Array.from({ length: 4 }, (_, i) => ({ id: `${id}-${i + 1}`, prompt: `${name}: How effectively does your organisation demonstrate this capability?`, required: true })) })) };
+export type AssessmentTemplate = typeof assessmentTemplate;
+export const questionCount = assessmentTemplate.dimensions.reduce((count, dimension) => count + dimension.questions.length, 0);
+export const maturityLevel = (score: number): MaturityLevel => score < 2 ? 'Initial' : score < 3 ? 'Developing' : score < 4 ? 'Defined' : 'Optimising';
