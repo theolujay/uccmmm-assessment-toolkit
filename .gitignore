@@ -23,3 +23,7 @@ lerna-debug.log*
 # temp directory
 .temp
 .tmp
+.next
+
+# TypeScript build info
+*.tsbuildinfo
