@@ -11,6 +11,31 @@ import { RecommendationsPage } from './pages/RecommendationsPage';
 import { StakeholdersPage } from './pages/StakeholdersPage';
 import { ReportsPage } from './pages/ReportsPage';
 import { SignUpPage } from './pages/SignUpPage';
+import { AuthProvider } from './auth/AuthProvider';
+import { RequireRole } from './components/RequireRole';
+import { ForgotPasswordPage, ResetPasswordPage } from './pages/PasswordPages';
+import { AccountSettingsPage } from './pages/AccountSettingsPage';
 import './styles.css';
+import './assessment.css';
 
-createRoot(document.getElementById('root')!).render(<StrictMode><BrowserRouter><Routes><Route path="/" element={<Navigate to="/sign-in" replace />} /><Route path="/sign-in" element={<SignInPage />} /><Route path="/sign-up" element={<SignUpPage />} /><Route element={<AppShell />}><Route path="/dashboard" element={<DashboardPage />} /><Route path="/assessment" element={<AssessmentPage />} /><Route path="/results" element={<ResultsPage />} /><Route path="/recommendations" element={<RecommendationsPage />} /><Route path="/reports" element={<ReportsPage />} /></Route><Route element={<AppShell role="admin" />}><Route path="/admin" element={<AdminDashboardPage />} /><Route path="/stakeholders" element={<StakeholdersPage />} /><Route path="/admin/reports" element={<ReportsPage />} /></Route></Routes></BrowserRouter></StrictMode>);
+createRoot(document.getElementById('root')!).render(<StrictMode><AuthProvider><BrowserRouter><Routes>
+  <Route path="/" element={<Navigate to="/sign-in" replace />} />
+  <Route path="/sign-in" element={<SignInPage />} />
+  <Route path="/sign-up" element={<SignUpPage />} />
+  <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+  <Route path="/reset-password" element={<ResetPasswordPage />} />
+  <Route element={<RequireRole role="stakeholder"><AppShell /></RequireRole>}>
+    <Route path="/dashboard" element={<DashboardPage />} />
+  </Route>
+  <Route element={<RequireRole><AppShell /></RequireRole>}>
+    <Route path="/assessment" element={<AssessmentPage />} />
+    <Route path="/results" element={<ResultsPage />} />
+  </Route>
+  <Route element={<RequireRole role="admin"><AppShell /></RequireRole>}>
+    <Route path="/admin" element={<AdminDashboardPage />} />
+    <Route path="/stakeholders" element={<StakeholdersPage />} />
+    <Route path="/recommendations" element={<RecommendationsPage />} />
+    <Route path="/reports" element={<ReportsPage />} />
+    <Route path="/settings" element={<AccountSettingsPage />} />
+  </Route>
+</Routes></BrowserRouter></AuthProvider></StrictMode>);

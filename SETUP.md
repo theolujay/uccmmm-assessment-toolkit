@@ -1,4 +1,4 @@
-# Assessment Toolkit — Local Setup
+# UCCMM Assessment Toolkit — Local Setup
 
 ## 1. Install the prerequisites
 
@@ -60,4 +60,38 @@ http://localhost:5173
 
 Keep the terminal window open while using the app. Press `Ctrl+C` in the terminal to stop it.
 
-The current version uses sample data and does not require Supabase credentials.
+Without Supabase credentials, local development opens in demo mode and stores assessment progress in this browser. Demo invitations do not send email.
+
+## 6. Connect a Supabase project
+
+Copy `apps/web/.env.example` to `apps/web/.env.local` and set:
+
+```env
+VITE_SUPABASE_URL=https://your-project.supabase.co
+VITE_SUPABASE_ANON_KEY=your-public-anon-key
+```
+
+Apply the database migration and deploy the invitation functions:
+
+```bash
+supabase link --project-ref your-project-ref
+supabase db push
+supabase functions deploy invite-stakeholder
+supabase functions deploy manage-stakeholder
+```
+
+In Supabase Auth settings, set the production Site URL and allow the app’s `/reset-password` redirect. Enable email confirmation for Admin accounts.
+
+Set these Edge Function secrets in Supabase. The service-role key and Resend API key must never be added to a `VITE_` variable or shipped to the browser:
+
+```text
+SUPABASE_URL
+SUPABASE_ANON_KEY
+SUPABASE_SERVICE_ROLE_KEY
+RESEND_API_KEY
+INVITATION_FROM_EMAIL
+APP_BASE_URL
+APP_ORIGIN
+```
+
+`INVITATION_FROM_EMAIL` must use a sender domain verified in Resend. `APP_BASE_URL` is the public app URL; `APP_ORIGIN` is its origin, such as `https://assessment.example.com`.

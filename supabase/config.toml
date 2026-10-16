@@ -1,0 +1,7 @@
+project_id = "uccmmm-assessment-toolkit"
+
+[functions.invite-stakeholder]
+verify_jwt = true
+
+[functions.manage-stakeholder]
+verify_jwt = true

@@ -1,286 +1,159 @@
-You are the lead engineer for a school project called **Assessment Toolkit**.
+# UCCMM Assessment Toolkit — Master Development Prompt & Technical Specification
 
-The application must be built as a production-quality Progressive Web Application (PWA).
-
-## 1. Before writing code
-
-First inspect the complete repository.
-
-Read:
-
-- AGENTS.md
-- README.md
-- all BMAD-generated project documentation
-- package.json if it exists
-- the existing folder structure
-
-Do not immediately generate the entire application.
-
-First report:
-
-1. current repository state;
-2. anything already configured;
-3. any conflicts or missing dependencies;
-4. the implementation plan you propose;
-5. the files/directories you intend to create or modify.
-
-Then proceed with the approved architecture below unless an existing repository convention provides a strong reason not to.
+> **Operational Directive**: This document serves as the master prompt and technical specification for all engineers and AI assistants developing the **UCCMM Assessment Toolkit**. It harmonizes the 47 sections of the Master Development Prompt with the UCCMM Scoring Specification.
 
 ---
 
-## 2. Technology stack
-
-Use:
-
-- React
-- Vite
-- TypeScript
-- Tailwind CSS
-- React Router
-- React Hook Form
-- Zod
-- Supabase for authentication and PostgreSQL persistence
-- IndexedDB for offline assessment drafts
-- Vitest and React Testing Library
-- Playwright for critical end-to-end journeys
-- appropriate Vite PWA/service-worker tooling
-
-Do not introduce Next.js or another major framework without a documented reason.
-
-Keep dependencies minimal.
+## 1. Product Identity & Context
+- **Product Name**: User-Centred Change Management Maturity Model (UCCMM) Assessment Toolkit.
+- **Target Audience**: IT leaders, project sponsors, and enterprise employees implementing Enterprise Resource Planning (ERP) systems in Nigeria.
+- **Form Factor**: Production-quality Progressive Web Application (PWA).
+- **Primary Source of Truth**:
+  - **Visuals**: The official Figma design file (`Assessment Toolkit`). Reproduce colors, typography, layout, spacing, and interaction states exactly.
+  - **Functional & Business Logic**: This specification and the academic scoring model in `docs/UCCMM Assessment Scoring Specification.md`.
 
 ---
 
-## 3. Design source
+## 2. User Roles & Access Architecture
 
-The Figma file **Assessment Toolkit** is the visual source of truth.
+### 2.1 Admin / IT Leader
+- Organisation owner and primary administrator.
+- Only the Admin can create an organisation account.
+- **Capabilities**:
+  - Complete 2-stage organisation registration.
+  - Log in with email, password, and remember-me.
+  - Take the UCCMM assessment.
+  - Invite stakeholders (Name, Email, Department, Job Role) and manage default passcodes.
+  - Monitor aggregate participation (Invited, In Progress, Completed, Not Started).
+  - View multidimensional results, overall maturity score, and 6-axis Radar Chart.
+  - Review prioritised recommendations for dimensions scoring between 10% and 80%.
+  - Access historical assessment records by date without overwriting past results.
+  - Download comprehensive organisation readiness reports.
+  - Manage account and organisation settings.
 
-The application includes:
-
-- organisation/personal signup;
-- authentication;
-- role-based dashboards;
-- admin dashboard;
-- stakeholder management;
-- staff dashboard;
-- assessment management;
-- multi-dimension assessment;
-- scoring;
-- recommendations;
-- results/reporting.
-
-Reproduce the Figma layouts accurately while creating reusable components instead of copying markup separately for every page.
-
-Extract shared:
-
-- typography;
-- colours;
-- spacing;
-- button styles;
-- form controls;
-- cards;
-- status badges;
-- tables;
-- navigation;
-- assessment progress UI.
-
-The app must be responsive and usable on desktop, tablet and mobile.
-
-Do not hard-code desktop Figma widths.
+### 2.2 Stakeholder / Employee
+- Organisational employees invited by the Admin.
+- **Strict Constraint**: Stakeholders **cannot** register independently.
+- **Authentication**: Email + Passcode only.
+- **Capabilities**:
+  - Complete the 30-question UCCMM assessment with autosave resilience.
+  - Non-linear question navigation and pre-submission review screen.
+  - View **personal readiness profile** and individual radar chart upon submission.
+- **Access Restrictions**:
+  - Must **never** see the Admin navigation, admin dashboard, recommendations, stakeholder list, or organisation-wide aggregated metrics.
 
 ---
 
-## 4. Known design inconsistencies
-
-Do not blindly reproduce inconsistent Figma copy.
-
-Known issues include:
-
-- some UI refers to 30 assessment questions while another refers to 24;
-- an assessment navigation item for Dimension 6 is labelled as Dimension 5: Resilience.
-
-Question and dimension counts must be derived from data rather than hard-coded into UI components.
-
-Create a central assessment configuration/data model so that question counts, dimension names and sequence come from one source of truth.
-
-Document any additional inconsistencies discovered.
-
-Do not silently invent a business rule to resolve an ambiguity.
+## 3. Strict Anonymisation & Privacy Mandate
+- The Admin needs to know participation rates (who completed, who hasn't).
+- However, **the Admin must NEVER be able to see or identify an individual stakeholder's specific answers or scores**.
+- **Architectural Requirement**: Decouple respondent identity from the response store. Store participation status (`completed: true`) in the stakeholder record, while assessment responses are stored anonymously or with non-reversible keys. Enforce this at the database/RLS layer, not merely by hiding UI elements.
 
 ---
 
-## 5. Core data model
+## 4. Assessment Engine & Scoring Specification
 
-Design for these concepts:
+### 4.1 Structure
+- **6 Dimensions**:
+  1. Leadership, Governance & Strategy
+  2. Communication and Stakeholder Engagement
+  3. Requirements and Process Alignment
+  4. Organisational and User Readiness
+  5. Training, Support, and User Experience
+  6. Contextual Resilience and Continuous Improvement
+- **5 Core Questions per Dimension** = **30 Core Questions Total**.
+- The 5 core questions per dimension are fixed and immutable. Admins may append additional questions in future versions.
+- **5 Response Options per Question**: Weighted numerically $1 \dots 5$.
 
-- profiles;
-- organisations;
-- organisation membership;
-- users/roles;
-- assessment templates;
-- dimensions;
-- questions;
-- assessments;
-- assessment responses;
-- dimension scores;
-- overall scores;
-- recommendations;
-- reports.
+### 4.2 Mathematical Formulas
 
-Use clear TypeScript domain types.
+#### Dimension Score ($D_j$)
+$$D_j = \frac{\sum_{i=1}^{n_j} r_{ij}}{5n_j} \times 100$$
+- $r_{ij} \in \{1, 2, 3, 4, 5\}$: Response value selected for question $i$ in dimension $j$.
+- $n_j = 5$: Number of core questions in dimension $j$.
+- $5$: Maximum possible score per item.
+- Score Range: $20\% \dots 100\%$.
 
-Keep UI components independent from direct Supabase queries by providing an appropriate service/data-access layer.
+#### Overall Maturity Score ($M$)
+$$M = \sum_{j=1}^{6} w_j D_j$$
+- $w_j$: Dimension weight (configurable, defaulting to equal weighting $\approx 0.1667$).
+- **Sum Constraint**: $\sum_{j=1}^{6} w_j = 1.0$ ($100\%$).
 
----
+### 4.3 The Five Maturity Levels
+Every score maps to one of five maturity stages:
+1. **Initial**
+2. **Developing**
+3. **Defined**
+4. **Managed**
+5. **Optimising**
 
-## 6. Role-based access
-
-Support at minimum:
-
-- Admin
-- Staff/User
-
-Protected routes must prevent unauthorised role access.
-
-Do not rely exclusively on hiding frontend buttons for security.
-
-Prepare Supabase Row Level Security requirements and migrations/policies where appropriate.
-
----
-
-## 7. Assessment workflow
-
-Implement the assessment engine so a user can:
-
-1. start an assessment;
-2. see assessment progress;
-3. navigate through dimensions/questions;
-4. save responses automatically;
-5. continue an unfinished assessment;
-6. survive accidental refresh/browser closure;
-7. continue temporarily without connectivity;
-8. validate required questions;
-9. submit an assessment;
-10. calculate/display scores;
-11. view dimension-level results;
-12. view recommendations;
-13. generate/view a report.
-
-Question data must drive the UI.
-
-Do not create one React component per question.
+### 4.4 Assessment Immutability & Versioning
+- Completed assessments must store an immutable snapshot of:
+  - Question text and response values.
+  - Dimension weights at the time of submission.
+  - Calculated dimension scores and overall maturity score.
+  - Maturity levels and assessment timestamp.
+- Future changes to questions or weights must **never** alter historical assessment records.
 
 ---
 
-## 8. PWA requirements
+## 5. UI Layout & Interaction Specifications
 
-This must be a genuine installable PWA.
+### 5.1 3-Pane Assessment Interface
+The assessment view must implement the Figma 3-pane layout on desktop:
+- **Left Pane**: Dimension list with real-time status indicators (*Not Started*, *In Progress*, *Completed*).
+- **Centre Pane**: Current dimension title, description, question prompt, and 5 interactive option cards.
+- **Right Pane**: Interactive question progress grid ($1 \dots 30$) with visual states (*Current*, *Answered*, *Unanswered/Skipped*).
 
-Configure:
+### 5.2 Assessment Workflow
+1. **Assessment Intro**: Explains the 6 dimensions, 30 questions, scoring method, and autosave.
+2. **Question Flow**: Allows non-linear jumping between questions and dimensions.
+3. **Autosave**: Every answer selection persists to IndexedDB immediately, surviving refreshes and connection drops.
+4. **Review Screen**: Displays all 30 questions before final submission, flagging unanswered questions.
+5. **Submission**: Calculates scores, locks the record, and transitions to the Results view.
 
-- Web App Manifest;
-- application icons/placeholders;
-- service worker;
-- installability;
-- offline fallback;
-- sensible app-shell caching;
-- update handling;
-- network-status handling.
-
-An assessment that is in progress should be stored locally when necessary and recoverable when the device reconnects.
-
-Do not cache authentication tokens or sensitive API responses using unsafe generic service-worker strategies.
-
----
-
-## 9. Accessibility and UX
-
-Include:
-
-- keyboard navigation;
-- semantic HTML;
-- visible focus states;
-- accessible labels;
-- appropriate ARIA only where required;
-- readable contrast;
-- loading states;
-- error states;
-- empty states;
-- validation messages;
-- disabled/submitting states;
-- mobile-friendly touch targets.
+### 5.3 Empty States & Dynamic Controls
+- **Admin Dashboard**: Before an assessment is taken, show the empty state (*"No assessment data yet"*). The **"Download Report"** CTA must be **disabled** until an assessment is completed.
+- **Form Controls**: All inputs must handle `default`, `focus`, `filled`, `error`, `disabled`, and `valid` states. Primary submit buttons remain disabled until forms pass Zod validation.
 
 ---
 
-## 10. Development strategy
+## 6. Recommendations & Reporting Engine
 
-Do not attempt the whole project in one uncontrolled change.
+### 6.1 Recommendations Engine
+- Generated automatically upon assessment completion.
+- Focuses on dimensions scoring between **10% and 80%** (areas not yet in the *Optimising* tier).
+- Explains:
+  - What needs improvement.
+  - Why the dimension matters in an ERP rollout.
+  - Specific, actionable steps to elevate maturity.
+- Filterable by historical assessment dates.
 
-Implement in milestones:
-
-### Milestone 1 – Project foundation
-Tooling, routing, Tailwind, PWA foundation, project structure, linting and testing.
-
-### Milestone 2 – Design system and application shell
-Reusable components and responsive application layout.
-
-### Milestone 3 – Figma screens with mock data
-Build the major screens and make the complete happy-path navigation demonstrable.
-
-### Milestone 4 – Authentication and roles
-Supabase authentication and protected role-based routes.
-
-### Milestone 5 – Assessment engine
-Data-driven questions, responses, autosave, resume and validation.
-
-### Milestone 6 – Offline PWA functionality
-IndexedDB/local drafts, connectivity handling and synchronisation.
-
-### Milestone 7 – Scoring, recommendations and reporting
-
-### Milestone 8 – Testing and production readiness
-
-At the end of every milestone:
-
-- run TypeScript checks;
-- run linting;
-- run relevant tests;
-- fix failures before continuing;
-- summarise completed work;
-- list unresolved issues.
+### 6.2 Reporting Engine
+- Generates a polished, printable/PDF report containing:
+  - Organisation profile and assessment date.
+  - Overall maturity score and maturity level.
+  - 6 dimension scores and multidimensional **Radar Chart**.
+  - Prioritised action recommendations.
+  - Complete exclusion of identifiable stakeholder responses.
 
 ---
 
-## 11. Coding standards
+## 7. Technology Stack & Coding Standards
 
-Use TypeScript strict mode.
+### 7.1 Approved Stack
+- **Framework**: React 19 + Vite 7 (Strictly client-side SPA; **no Next.js**).
+- **Monorepo**: pnpm workspaces (`apps/web` and `packages/contracts`).
+- **Styling**: Tailwind CSS 4 (`@import "tailwindcss";`), Inter & Anton typography.
+- **Forms & Validation**: React Hook Form + Zod.
+- **Offline Storage**: IndexedDB via `idb`.
+- **PWA Tooling**: `vite-plugin-pwa` with service worker caching.
+- **Testing**: Vitest + Testing Library + Playwright.
+- **Backend / BaaS**: Supabase (PostgreSQL + RLS + Auth).
 
-Avoid:
-
-- `any` unless genuinely unavoidable;
-- giant components;
-- duplicated UI;
-- hard-coded assessment data throughout components;
-- fake API calls presented as implemented;
-- unnecessary state-management libraries;
-- hard-coded secrets;
-- committing `.env` files.
-
-Keep environment variables in `.env.example`.
-
-Prefer simple, understandable architecture appropriate for a school project over enterprise complexity.
-
----
-
-## 12. Important behaviour
-
-If Supabase credentials are not yet available:
-
-- do not block frontend development;
-- create a clearly separated mock-data implementation;
-- define interfaces that will later be backed by Supabase;
-- never pretend mock data is a live backend.
-
-Record significant assumptions in project documentation.
-
-Start by auditing the repository and proposing the implementation plan. Do not generate the entire application before completing that assessment.
+### 7.2 Strict Engineering Rules
+1. **No Next.js Artifacts**: Keep codebase purely client-side; remove all `next/server` remnants.
+2. **TypeScript Strict Mode**: Zero `any` types; define models in `@assessment/contracts`.
+3. **Service Layer Abstraction**: UI components must interact with data via services (`apps/web/src/services/`) to allow mock operation when Supabase credentials are not active.
+4. **Never Block on Missing Credentials**: Provide robust mock fallbacks that simulate live operations cleanly.
+5. **Historical Integrity**: Never mutate past assessment submissions.
