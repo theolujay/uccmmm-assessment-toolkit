@@ -7,22 +7,24 @@ import {
 } from '@assessment/contracts';
 
 interface ToolkitDB extends DBSchema {
-  drafts: { key: string; value: AssessmentDraft };
-  records: { key: string; value: AssessmentRecord };
+  drafts: { key: string; value: AssessmentDraft; indexes: { byRespondentVersion: [string, string] } };
+  records: { key: string; value: AssessmentRecord & { respondentKey: string }; indexes: { byRespondent: string } };
 }
 
 const databaseName = 'uccmm-assessment-toolkit';
 
-const db = () => openDB<ToolkitDB>(databaseName, 2, {
-  upgrade(database) {
-    if (!database.objectStoreNames.contains('drafts')) database.createObjectStore('drafts', { keyPath: 'id' });
-    if (!database.objectStoreNames.contains('records')) database.createObjectStore('records', { keyPath: 'id' });
+const db = () => openDB<ToolkitDB>(databaseName, 3, {
+  upgrade(database, oldVersion, _newVersion, transaction) {
+    const drafts = database.objectStoreNames.contains('drafts')
+      ? transaction.objectStore('drafts')
+      : database.createObjectStore('drafts', { keyPath: 'id' });
+    if (oldVersion < 3) drafts.createIndex('byRespondentVersion', ['respondentKey', 'assessmentVersion']);
+    const records = database.objectStoreNames.contains('records')
+      ? transaction.objectStore('records')
+      : database.createObjectStore('records', { keyPath: 'id' });
+    if (oldVersion < 3) records.createIndex('byRespondent', 'respondentKey');
   },
 });
-
-export function draftKey(respondentKey: string, assessmentVersion: string): string {
-  return `${respondentKey}:${assessmentVersion}`;
-}
 
 export async function saveDraft(draft: AssessmentDraft): Promise<void> {
   const parsedDraft = assessmentDraftSchema.parse(draft);
@@ -30,25 +32,27 @@ export async function saveDraft(draft: AssessmentDraft): Promise<void> {
 }
 
 export async function getDraft(respondentKey: string, assessmentVersion: string): Promise<AssessmentDraft | undefined> {
-  const draft = await (await db()).get('drafts', draftKey(respondentKey, assessmentVersion));
-  const result = assessmentDraftSchema.safeParse(draft);
-  return result.success ? result.data : undefined;
+  const drafts = await (await db()).getAllFromIndex('drafts', 'byRespondentVersion', [respondentKey, assessmentVersion]);
+  // Older clients could create multiple drafts because lookups did not match the stored UUID key.
+  for (const draft of drafts.sort((first, second) => second.updatedAt.localeCompare(first.updatedAt))) {
+    const result = assessmentDraftSchema.safeParse(draft);
+    if (result.success) return result.data;
+  }
+  return undefined;
 }
 
 export async function clearDraft(respondentKey: string, assessmentVersion: string): Promise<void> {
-  await (await db()).delete('drafts', draftKey(respondentKey, assessmentVersion));
+  const transaction = (await db()).transaction('drafts', 'readwrite');
+  const keys = await transaction.store.index('byRespondentVersion').getAllKeys([respondentKey, assessmentVersion]);
+  await Promise.all([...keys.map((key) => transaction.store.delete(key)), transaction.done]);
 }
 
-export async function saveRecord(record: AssessmentRecord): Promise<void> {
-  await (await db()).put('records', assessmentRecordSchema.parse(record));
+export async function saveRecord(record: AssessmentRecord, respondentKey: string): Promise<void> {
+  await (await db()).put('records', { ...assessmentRecordSchema.parse(record), respondentKey });
 }
 
-export async function getLatestRecord(organisationId: string, respondentType: AssessmentRecord['respondentType']): Promise<AssessmentRecord | undefined> {
-  return (await getAssessmentHistory(organisationId, respondentType))[0];
-}
-
-export async function getAssessmentHistory(organisationId: string, respondentType: AssessmentRecord['respondentType']): Promise<AssessmentRecord[]> {
-  const records = await (await db()).getAll('records');
+export async function getAssessmentHistory(organisationId: string, respondentType: AssessmentRecord['respondentType'], respondentKey: string): Promise<AssessmentRecord[]> {
+  const records = await (await db()).getAllFromIndex('records', 'byRespondent', respondentKey);
   return records
     .filter((record) => record.organisationId === organisationId && record.respondentType === respondentType)
     .map((record) => assessmentRecordSchema.safeParse(record))

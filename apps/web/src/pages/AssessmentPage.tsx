@@ -1,18 +1,26 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { assessmentTemplate, questionCount, type AssessmentResponses } from '../data/assessment';
+import { assessmentTemplate, evidenceMaxLength, questionCount, type AssessmentEvidence, type AssessmentResponses } from '@assessment/contracts';
+import { useAuth } from '../auth/AuthProvider';
 import { loadActiveDraft, saveActiveDraft, submitActiveAssessment } from '../services/assessment-service';
 
 type AssessmentMode = 'intro' | 'questions' | 'review';
 
 export function AssessmentPage() {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const { userId, role, organizationId, email } = user ?? {};
+  const identity = useMemo(() => userId && role && organizationId && email !== undefined
+    ? { userId, role, organizationId, email }
+    : undefined, [userId, role, organizationId, email]);
   const questions = useMemo(
     () => assessmentTemplate.dimensions.flatMap((dimension) => dimension.questions.map((question) => ({ question, dimension }))),
     [],
   );
   const [mode, setMode] = useState<AssessmentMode>('intro');
   const [responses, setResponses] = useState<AssessmentResponses>({});
+  const [evidence, setEvidence] = useState<AssessmentEvidence>({});
+  const pendingSave = useRef(Promise.resolve());
   const [activeQuestionId, setActiveQuestionId] = useState(questions[0].question.id);
   const [isReady, setIsReady] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -20,13 +28,15 @@ export function AssessmentPage() {
   const [error, setError] = useState<string>();
 
   useEffect(() => {
+    if (!identity) return;
     let cancelled = false;
-    void loadActiveDraft()
+    void loadActiveDraft(identity)
       .then((draft) => {
         if (cancelled) return;
         setResponses(draft.responses);
+        setEvidence(draft.evidence);
         setActiveQuestionId(draft.activeQuestionId);
-        setMode(Object.keys(draft.responses).length > 0 ? 'questions' : 'intro');
+        setMode(draft.status === 'in_progress' ? 'questions' : 'intro');
       })
       .catch(() => {
         if (!cancelled) setError('We could not restore your saved progress. You can still complete this assessment.');
@@ -35,27 +45,30 @@ export function AssessmentPage() {
         if (!cancelled) setIsReady(true);
       });
     return () => { cancelled = true; };
-  }, []);
+  }, [identity]);
 
   useEffect(() => {
-    if (!isReady) return;
-    void saveActiveDraft({ responses, activeQuestionId }).then(() => setError(undefined)).catch((error) => {
-      setError(error instanceof Error ? error.message : 'Your answer could not be saved. Please keep this tab open and try again.');
+    if (!identity || !isReady || isSubmitting) return;
+    // Serialize saves so a slow request cannot overwrite a more recent edit.
+    const save = pendingSave.current.then(async () => {
+      if (pendingSave.current !== save) return;
+      try {
+        await saveActiveDraft(identity, { responses, evidence, activeQuestionId });
+        if (pendingSave.current === save) setError(undefined);
+      } catch (saveError) {
+        if (pendingSave.current === save) setError(saveError instanceof Error ? saveError.message : 'Your progress could not be saved. Please keep this tab open and try again.');
+      }
     });
-  }, [activeQuestionId, isReady, responses]);
+    pendingSave.current = save;
+  }, [activeQuestionId, evidence, identity, isOnline, isReady, isSubmitting, responses]);
 
   useEffect(() => {
     const onOffline = () => setIsOnline(false);
-    const onOnline = () => {
-      setIsOnline(true);
-      if (isReady) void saveActiveDraft({ responses, activeQuestionId }).then(() => setError(undefined)).catch((syncError) => {
-        setError(syncError instanceof Error ? syncError.message : 'Your saved answers could not sync yet.');
-      });
-    };
+    const onOnline = () => setIsOnline(true);
     window.addEventListener('offline', onOffline);
     window.addEventListener('online', onOnline);
     return () => { window.removeEventListener('offline', onOffline); window.removeEventListener('online', onOnline); };
-  }, [activeQuestionId, isReady, responses]);
+  }, []);
 
   const activeIndex = Math.max(0, questions.findIndex(({ question }) => question.id === activeQuestionId));
   const current = questions[activeIndex];
@@ -77,12 +90,22 @@ export function AssessmentPage() {
     setResponses((currentResponses) => ({ ...currentResponses, [current.question.id]: weight }));
   };
 
+  const updateEvidence = (text: string) => {
+    setEvidence((currentEvidence) => {
+      const next = { ...currentEvidence };
+      if (text === '') delete next[current.question.id];
+      else next[current.question.id] = text;
+      return next;
+    });
+  };
+
   const submit = async () => {
-    if (!complete) return;
+    if (!complete || !identity) return;
     setError(undefined);
     setIsSubmitting(true);
     try {
-      await submitActiveAssessment(responses);
+      await pendingSave.current;
+      await submitActiveAssessment(identity, responses, evidence);
       navigate('/results');
     } catch (submissionError) {
       setError(submissionError instanceof Error ? submissionError.message : 'We could not submit this assessment. Please try again.');
@@ -101,6 +124,7 @@ export function AssessmentPage() {
         <li>Six dimensions with five questions each.</li>
         <li>Choose one response from “Not in place” to “Fully and consistently in place.”</li>
         <li>Your score is calculated from all 30 responses and classified into a maturity level.</li>
+        <li>You can add a private note to any question. It won’t affect your score.</li>
         <li>Your progress saves automatically on this device and syncs to your account when connected.</li>
         <li>You can leave and resume later. All questions must be answered before submission.</li>
       </ul><button className="button" onClick={() => setMode('questions')}>{answeredCount > 0 ? 'Resume assessment' : 'Start assessment'}</button></article>
@@ -119,15 +143,15 @@ export function AssessmentPage() {
           <div>{dimension.questions.map((question) => {
             const absoluteIndex = questions.findIndex(({ question: item }) => item.id === question.id) + 1;
             const answered = responses[question.id] !== undefined;
-            return <button className="review-question" key={question.id} onClick={() => selectQuestion(question.id)}>
-              <span><b>{absoluteIndex}.</b> {question.prompt}</span><small className={answered ? 'answered' : 'unanswered'}>{answered ? 'Answered' : 'Unanswered'}</small>
+            return <button className="review-question" key={question.id} disabled={isSubmitting} onClick={() => selectQuestion(question.id)}>
+              <span><b>{absoluteIndex}.</b> {question.prompt}</span><small className={answered ? 'answered' : 'unanswered'}>{answered ? 'Answered' : 'Unanswered'}{evidence[question.id]?.trim() && <span className="evidence-indicator">Evidence added</span>}</small>
             </button>;
           })}</div>
         </article>)}
       </div>
       {error && <p className="form-error" role="alert">{error}</p>}
       <div className="review-actions">
-        <button className="button secondary" onClick={() => setMode('questions')}>Back to questions</button>
+        <button className="button secondary" disabled={isSubmitting} onClick={() => setMode('questions')}>Back to questions</button>
         <button className="button" disabled={!complete || isSubmitting} onClick={() => void submit()}>{isSubmitting ? 'Submitting…' : 'Submit assessment'}</button>
       </div>
     </section>;
@@ -161,6 +185,19 @@ export function AssessmentPage() {
             <span>{option.label}</span><small>{option.weight}/5</small>
           </label>)}
         </fieldset>
+        <details className="question-evidence" key={current.question.id}>
+          <summary>Evidence or comment <span>(optional)</span></summary>
+          <label htmlFor="question-evidence">Your private note</label>
+          <textarea
+            id="question-evidence"
+            aria-describedby="question-evidence-hint"
+            maxLength={evidenceMaxLength}
+            rows={4}
+            value={evidence[current.question.id] ?? ''}
+            onChange={(event) => updateEvidence(event.target.value)}
+          />
+          <p id="question-evidence-hint">Only you can see this note. {evidence[current.question.id]?.length ?? 0}/{evidenceMaxLength}</p>
+        </details>
         {error && <p className="form-error" role="alert">{error}</p>}
         <div className="question-actions">
           <button className="button secondary" disabled={activeIndex === 0} onClick={() => selectQuestion(questions[activeIndex - 1].question.id)}>Previous</button>

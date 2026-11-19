@@ -4,13 +4,16 @@ import {
   assessmentTemplate,
   createAssessmentRecord,
   type AssessmentDraft,
+  type AssessmentEvidence,
   type AssessmentRecord,
   type AssessmentResponses,
   type Role,
 } from '@assessment/contracts';
-import { clearDraft, draftKey, getAssessmentHistory as getStoredAssessmentHistory, getDraft, getLatestRecord, saveDraft, saveRecord } from '../lib/storage';
+import { clearDraft, getAssessmentHistory as getStoredAssessmentHistory, getDraft, saveDraft, saveRecord } from '../lib/storage';
 import { isDemoMode, requireSupabase, supabase } from '../lib/supabase';
-import { getCurrentIdentity } from './auth-service';
+import { getCurrentIdentity, type AuthIdentity } from './auth-service';
+
+type AssessmentIdentity = Pick<AuthIdentity, 'userId' | 'role' | 'organizationId' | 'email'>;
 
 interface AssessmentContext {
   organisationId: string;
@@ -19,12 +22,11 @@ interface AssessmentContext {
   userId: string;
 }
 
-async function getAssessmentContext(): Promise<AssessmentContext> {
-  const identity = await getCurrentIdentity();
-  if (!identity) throw new Error('Sign in before starting an assessment.');
+function getAssessmentContext(identity: AssessmentIdentity): AssessmentContext {
   return {
     organisationId: identity.organizationId,
-    respondentKey: identity.userId,
+    // Demo accounts share simulated user IDs by role, so also scope browser storage by sign-in email.
+    respondentKey: isDemoMode ? `${identity.userId}:${identity.email.trim().toLowerCase()}` : identity.userId,
     respondentType: identity.role,
     userId: identity.userId,
   };
@@ -38,11 +40,19 @@ function createDraft(context: AssessmentContext, now = new Date().toISOString())
     respondentType: context.respondentType,
     assessmentVersion: assessmentTemplate.version,
     responses: {},
+    evidence: {},
     activeQuestionId: assessmentTemplate.dimensions[0].questions[0].id,
     status: 'draft',
     createdAt: now,
     updatedAt: now,
   };
+}
+
+function normalizeTimestamp(value: unknown): unknown {
+  if (typeof value !== 'string') return value;
+  // PostgreSQL timestamps can have a UTC offset; contracts and draft comparisons use UTC ISO strings.
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toISOString();
 }
 
 function draftFromRow(row: Record<string, unknown>, context: AssessmentContext): AssessmentDraft | undefined {
@@ -53,10 +63,11 @@ function draftFromRow(row: Record<string, unknown>, context: AssessmentContext):
     respondentType: row.respondent_type,
     assessmentVersion: row.assessment_version,
     responses: row.responses,
+    evidence: row.evidence,
     activeQuestionId: row.active_question_id,
     status: row.status,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
+    createdAt: normalizeTimestamp(row.created_at),
+    updatedAt: normalizeTimestamp(row.updated_at),
   });
   return parsed.success ? parsed.data : undefined;
 }
@@ -67,8 +78,9 @@ function recordFromRow(row: Record<string, unknown>): AssessmentRecord {
     organisationId: row.organization_id as string,
     respondentType: row.respondent_type as Role,
     assessmentVersion: row.assessment_version as string,
-    submittedAt: row.submitted_at as string,
-    responses: row.responses as AssessmentResponses,
+    submittedAt: normalizeTimestamp(row.submitted_at),
+    responses: row.responses,
+    evidence: row.evidence,
     templateSnapshot: row.template_snapshot as AssessmentRecord['templateSnapshot'],
     dimensionScores: row.dimension_scores as AssessmentRecord['dimensionScores'],
     overallScore: Number(row.overall_score),
@@ -76,8 +88,8 @@ function recordFromRow(row: Record<string, unknown>): AssessmentRecord {
   });
 }
 
-export async function loadActiveDraft(): Promise<AssessmentDraft> {
-  const context = await getAssessmentContext();
+export async function loadActiveDraft(identity: AssessmentIdentity): Promise<AssessmentDraft> {
+  const context = getAssessmentContext(identity);
   const localDraft = await getDraft(context.respondentKey, assessmentTemplate.version);
   if (supabase && typeof navigator !== 'undefined' && navigator.onLine) {
     const { data, error } = await supabase.from('assessment_drafts').select('*')
@@ -98,17 +110,19 @@ export async function loadActiveDraft(): Promise<AssessmentDraft> {
   return draft;
 }
 
-export async function saveActiveDraft(input: {
+export async function saveActiveDraft(identity: AssessmentIdentity, input: {
   responses: AssessmentResponses;
+  evidence: AssessmentEvidence;
   activeQuestionId: string;
 }): Promise<AssessmentDraft> {
-  const context = await getAssessmentContext();
+  const context = getAssessmentContext(identity);
   const existingDraft = await getDraft(context.respondentKey, assessmentTemplate.version) ?? createDraft(context);
   const draft: AssessmentDraft = {
     ...existingDraft,
     responses: input.responses,
+    evidence: input.evidence,
     activeQuestionId: input.activeQuestionId,
-    status: Object.keys(input.responses).length === 0 ? 'draft' : 'in_progress',
+    status: Object.keys(input.responses).length || Object.keys(input.evidence).length ? 'in_progress' : 'draft',
     updatedAt: new Date().toISOString(),
   };
   await saveDraft(draft);
@@ -121,18 +135,19 @@ export async function saveActiveDraft(input: {
       respondent_type: context.respondentType,
       assessment_version: draft.assessmentVersion,
       responses: draft.responses,
+      evidence: draft.evidence,
       active_question_id: draft.activeQuestionId,
       status: draft.status,
       created_at: draft.createdAt,
       updated_at: draft.updatedAt,
     }, { onConflict: 'user_id,assessment_version' });
-    if (error) throw new Error(`Your answer is saved on this device but could not sync: ${error.message}`);
+    if (error) throw new Error(`Your progress is saved on this device but could not sync: ${error.message}`);
   }
   return draft;
 }
 
-export async function submitActiveAssessment(responses: AssessmentResponses): Promise<AssessmentRecord> {
-  const context = await getAssessmentContext();
+export async function submitActiveAssessment(identity: AssessmentIdentity, responses: AssessmentResponses, evidence: AssessmentEvidence): Promise<AssessmentRecord> {
+  const context = getAssessmentContext(identity);
   const draft = await getDraft(context.respondentKey, assessmentTemplate.version) ?? createDraft(context);
   const record = createAssessmentRecord({
     id: draft.id,
@@ -141,9 +156,10 @@ export async function submitActiveAssessment(responses: AssessmentResponses): Pr
     submittedAt: new Date().toISOString(),
     template: assessmentTemplate,
     responses,
+    evidence,
   });
 
-  await saveRecord(record);
+  await saveRecord(record, context.respondentKey);
   if (supabase) {
     const client = requireSupabase();
     const { data, error } = await client.rpc('submit_assessment_record', {
@@ -153,6 +169,7 @@ export async function submitActiveAssessment(responses: AssessmentResponses): Pr
       p_assessment_version: record.assessmentVersion,
       p_responses: record.responses,
       p_template_snapshot: record.templateSnapshot,
+      p_evidence: record.evidence,
     });
     if (error) {
       const { data: existingRecord } = await client.from('assessment_records').select('id').eq('id', record.id).maybeSingle();
@@ -160,7 +177,7 @@ export async function submitActiveAssessment(responses: AssessmentResponses): Pr
     }
     if (data) {
       const serverRecord = recordFromRow(data as Record<string, unknown>);
-      await saveRecord(serverRecord);
+      await saveRecord(serverRecord, context.respondentKey);
       await clearDraft(context.respondentKey, assessmentTemplate.version);
       return serverRecord;
     }
@@ -173,7 +190,9 @@ export async function submitActiveAssessment(responses: AssessmentResponses): Pr
 }
 
 export async function getAssessmentHistory(): Promise<AssessmentRecord[]> {
-  const context = await getAssessmentContext();
+  const identity = await getCurrentIdentity();
+  if (!identity) throw new Error('Sign in before viewing assessment results.');
+  const context = getAssessmentContext(identity);
   if (supabase) {
     const { data: respondentRows, error: respondentError } = await supabase.from('assessment_respondents')
       .select('assessment_id,submitted_at').eq('respondent_user_id', context.userId).order('submitted_at', { ascending: false });
@@ -185,19 +204,9 @@ export async function getAssessmentHistory(): Promise<AssessmentRecord[]> {
     return (data ?? []).map((row) => recordFromRow(row))
       .sort((first, second) => second.submittedAt.localeCompare(first.submittedAt));
   }
-  return getStoredAssessmentHistory(context.organisationId, context.respondentType);
+  return getStoredAssessmentHistory(context.organisationId, context.respondentType, context.respondentKey);
 }
 
 export async function getLatestAssessment(): Promise<AssessmentRecord | undefined> {
   return (await getAssessmentHistory())[0];
-}
-
-export async function getLocalOrLatestAssessment(): Promise<AssessmentRecord | undefined> {
-  const context = await getAssessmentContext();
-  if (isDemoMode) return getLatestRecord(context.organisationId, context.respondentType);
-  return getLatestAssessment();
-}
-
-export function activeDraftKey(respondentKey: string): string {
-  return draftKey(respondentKey, assessmentTemplate.version);
 }
