@@ -238,9 +238,19 @@ export const questionCount = assessmentTemplate.dimensions.reduce(
 export const assessmentResponseSchema = z.record(z.string(), z.number().int().min(1).max(5));
 export type AssessmentResponses = z.infer<typeof assessmentResponseSchema>;
 
+export const evidenceMaxLength = 1000;
+const assessmentQuestionIds = new Set(assessmentTemplate.dimensions.flatMap((dimension) => dimension.questions.map((question) => question.id)));
+export const assessmentEvidenceSchema = z.record(
+  z.string().refine((id) => assessmentQuestionIds.has(id), 'Unknown assessment question.'),
+  // Match the textarea's native maxLength, which counts UTF-16 code units.
+  z.string().refine((text) => text.length <= evidenceMaxLength, `Evidence must be at most ${evidenceMaxLength} characters.`),
+);
+export type AssessmentEvidence = z.infer<typeof assessmentEvidenceSchema>;
+
 export const assessmentDraftSchema = z.object({
   id: z.string().min(1), organisationId: z.string().min(1), respondentType: roleSchema,
   respondentKey: z.string().min(1), assessmentVersion: z.string().min(1), responses: assessmentResponseSchema,
+  evidence: assessmentEvidenceSchema.default({}),
   activeQuestionId: z.string().min(1), status: z.enum(['draft', 'in_progress']),
   createdAt: z.string().datetime(), updatedAt: z.string().datetime(),
 });
@@ -261,6 +271,7 @@ export interface AssessmentScoreSummary {
 export const assessmentRecordSchema = z.object({
   id: z.string().min(1), organisationId: z.string().min(1), respondentType: roleSchema,
   assessmentVersion: z.string().min(1), submittedAt: z.string().datetime(), responses: assessmentResponseSchema,
+  evidence: assessmentEvidenceSchema.default({}),
   templateSnapshot: assessmentTemplateSchema, dimensionScores: z.array(dimensionScoreSchema).length(6),
   overallScore: z.number().min(0).max(100), overallMaturityLevel: maturityLevelSchema,
 });
@@ -336,13 +347,13 @@ function freezeRecursively<T>(value: T): T {
 
 export function createAssessmentRecord(input: {
   id: string; organisationId: string; respondentType: Role; submittedAt: string;
-  template: AssessmentTemplate; responses: AssessmentResponses;
+  template: AssessmentTemplate; responses: AssessmentResponses; evidence?: AssessmentEvidence;
 }): AssessmentRecord {
   const scoreSummary = calculateAssessmentScores(input.template, input.responses);
-  const record: AssessmentRecord = {
+  return freezeRecursively(assessmentRecordSchema.parse({
     id: input.id, organisationId: input.organisationId, respondentType: input.respondentType,
     assessmentVersion: input.template.version, submittedAt: input.submittedAt,
-    responses: structuredClone(input.responses), templateSnapshot: structuredClone(input.template), ...scoreSummary,
-  };
-  return freezeRecursively(assessmentRecordSchema.parse(record));
+    responses: structuredClone(input.responses), evidence: structuredClone(input.evidence),
+    templateSnapshot: structuredClone(input.template), ...scoreSummary,
+  }));
 }

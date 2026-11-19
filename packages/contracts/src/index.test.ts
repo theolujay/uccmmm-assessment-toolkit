@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  assessmentDraftSchema,
+  assessmentRecordSchema,
   assessmentTemplate,
+  evidenceMaxLength,
   calculateAssessmentScores,
   calculateDimensionScore,
   classifyMaturity,
@@ -85,6 +88,46 @@ describe('account setup contracts', () => {
   it('rejects mismatched passwords and invalid employee counts', () => {
     expect(adminRegistrationSchema.safeParse({ ...registration, passwordConfirmation: 'different-password' }).success).toBe(false);
     expect(adminRegistrationSchema.safeParse({ ...registration, organisation: { ...registration.organisation, employeeCount: 0 } }).success).toBe(false);
+  });
+});
+
+describe('assessment evidence', () => {
+  const now = '2026-09-14T12:00:00.000Z';
+  const recordInput = {
+    id: 'assessment-1', organisationId: 'organisation-1', respondentType: 'stakeholder' as const,
+    submittedAt: now, template: assessmentTemplate, responses: completeResponses(4),
+  };
+  const draft = {
+    ...recordInput, respondentKey: 'respondent-1', assessmentVersion: assessmentTemplate.version,
+    activeQuestionId: 'leadership-1', status: 'in_progress', createdAt: now, updatedAt: now,
+  };
+
+  it('defaults to an empty map for existing drafts and submitted records', () => {
+    const { evidence, ...legacyRecord } = createAssessmentRecord(recordInput);
+    expect(evidence).toEqual({});
+    expect(assessmentDraftSchema.parse(draft).evidence).toEqual({});
+    expect(assessmentRecordSchema.parse(legacyRecord).evidence).toEqual({});
+  });
+
+  it('preserves optional free text and freezes a copy on submission without affecting scores', () => {
+    const evidence = { 'leadership-1': '  Notes\nSecond line  ', 'resilience-5': 'a'.repeat(evidenceMaxLength) };
+    expect(assessmentDraftSchema.parse({ ...draft, responses: {}, evidence }).evidence).toEqual(evidence);
+    const record = createAssessmentRecord({ ...recordInput, evidence });
+    expect(record.evidence).toEqual(evidence);
+    expect(Object.isFrozen(record.evidence)).toBe(true);
+    evidence['leadership-1'] = 'Edited';
+    expect(record.evidence['leadership-1']).toBe('  Notes\nSecond line  ');
+    expect(record.overallScore).toBe(80);
+  });
+
+  it.each([
+    { 'leadership-1': 'x'.repeat(evidenceMaxLength + 1) },
+    { 'leadership-1': '😀'.repeat(evidenceMaxLength / 2 + 1) },
+    { 'leadership-6': 'Unknown ID' },
+    { 'leadership-1': 123 },
+  ])('rejects invalid evidence in both drafts and records (%#)', (evidence) => {
+    expect(assessmentDraftSchema.safeParse({ ...draft, evidence }).success).toBe(false);
+    expect(assessmentRecordSchema.safeParse({ ...createAssessmentRecord(recordInput), evidence }).success).toBe(false);
   });
 });
 
