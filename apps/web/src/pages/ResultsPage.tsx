@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { AssessmentRecord } from '@assessment/contracts';
 import { useAuth } from '../auth/AuthProvider';
+import { DimensionEvidence } from '../components/DimensionEvidence';
 import { RadarChart } from '../components/RadarChart';
 import { getAssessmentHistory } from '../services/assessment-service';
 
@@ -38,6 +39,7 @@ export function ResultsPage() {
     <article className="panel dimension-panel result-dimension-panel"><h2>Dimension scores</h2>{record.dimensionScores.map((dimension) => <div className="score-row" key={dimension.dimensionId}>
       <div><span>{dimension.dimensionName}</span><b>{displayPercentage(dimension.scorePercentage)}</b></div>
       <div className="bar"><i style={{ width: `${dimension.scorePercentage}%` }} /></div><small>{dimension.maturityLevel}</small>
+      <DimensionEvidence record={record} dimensionId={dimension.dimensionId} />
     </div>)}</article>
   </section>;
 }
