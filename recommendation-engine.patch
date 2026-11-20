@@ -1,0 +1,700 @@
+From 1302cc70ede87699533ed56e91f784e4622b06f6 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 19 Nov 2026 11:35:23 +0000
+Subject: [PATCH] feat: rule-based recommendation engine, overall-result
+ qualification and Table 5.2 acceptance tests
+
+- contracts: generateRecommendations, rankDimensions, qualifyOverallResult
+- contracts: draft recommendation library (6 dimensions x 3 tiers), flagged as draft
+- contracts: scoring-acceptance tests implementing report Table 5.2 (TC-S/B/R/V)
+- web: recommendations page and printable report now render engine output
+- web: results page shows weakest-first ranking and critical-gap qualifier
+---
+ apps/web/src/assessment.css                   |  18 ++
+ .../components/RecommendationGroups.test.tsx  |  28 ++
+ .../src/components/RecommendationGroups.tsx   |  34 +++
+ apps/web/src/pages/RecommendationsPage.tsx    |   8 +-
+ apps/web/src/pages/ReportsPage.tsx            |   9 +-
+ apps/web/src/pages/ResultsPage.tsx            |   8 +-
+ packages/contracts/src/index.ts               |   1 +
+ .../contracts/src/recommendations.test.ts     | 102 ++++++++
+ packages/contracts/src/recommendations.ts     | 247 ++++++++++++++++++
+ .../contracts/src/scoring-acceptance.test.ts  | 112 ++++++++
+ 10 files changed, 558 insertions(+), 9 deletions(-)
+ create mode 100644 apps/web/src/components/RecommendationGroups.test.tsx
+ create mode 100644 apps/web/src/components/RecommendationGroups.tsx
+ create mode 100644 packages/contracts/src/recommendations.test.ts
+ create mode 100644 packages/contracts/src/recommendations.ts
+ create mode 100644 packages/contracts/src/scoring-acceptance.test.ts
+
+diff --git a/apps/web/src/assessment.css b/apps/web/src/assessment.css
+index 8801756..ecbded0 100644
+--- a/apps/web/src/assessment.css
++++ b/apps/web/src/assessment.css
+@@ -45,3 +45,21 @@ button:disabled{cursor:not-allowed;opacity:.55}.loading-state{display:grid;place
+ .logout-actions .button.secondary{background:#f3f3f3;color:#101828}
+ .logout-actions .logout-confirm{background:#ed3f36}
+ @media(max-width:760px){.participant-toolbar{grid-template-columns:1fr}.participant-filters{flex-wrap:wrap}.participant-filters input[type="search"]{width:100%;min-width:0}.participant-filters select{flex:1}.participant-pagination,.participant-pagination>div{flex-wrap:wrap;justify-content:center}.admin-empty-state{min-height:320px}}
++.draft-note{padding:12px 14px;margin:0 0 20px;border-radius:10px;background:#fff4dc;color:#8a4b00;font-size:13px;line-height:19px}
++.roadmap{display:grid;gap:28px}
++.roadmap-group h2{font-size:18px;margin:0}
++.roadmap-description{margin:4px 0 14px;color:#6e7277;font-size:13px}
++.recommendation-card{display:grid;gap:10px;background:#fff;border:1px solid #e4e5e6}
++.recommendation-card h3{margin:0;font-size:16px;line-height:23px}
++.recommendation-meta{margin:0;color:#6e7277;font-size:12px}
++.recommendation-card dl{display:grid;gap:8px;margin:0}
++.recommendation-card dl>div{display:grid;grid-template-columns:140px 1fr;gap:12px;font-size:13px;line-height:19px}
++.recommendation-card dt{color:#6e7277}
++.recommendation-card dd{margin:0}
++.priority-tag{display:inline-block;padding:3px 8px;border-radius:999px;font-weight:600;background:#e6f4ec;color:#087443}
++.priority-tag.high{background:#fff0ef;color:#b42318}
++.priority-tag.medium{background:#fff4dc;color:#a15c00}
++.qualifier{margin:6px 0 0;font-weight:600;color:#a15c00}
++.qualifier.critical{color:#b42318}
++@media(max-width:700px){.recommendation-card dl>div{grid-template-columns:1fr;gap:2px}}
++@media print{.roadmap-group{break-inside:avoid}.draft-note{border:1px solid #a15c00}}
+diff --git a/apps/web/src/components/RecommendationGroups.test.tsx b/apps/web/src/components/RecommendationGroups.test.tsx
+new file mode 100644
+index 0000000..2d35a92
+--- /dev/null
++++ b/apps/web/src/components/RecommendationGroups.test.tsx
+@@ -0,0 +1,28 @@
++// @vitest-environment jsdom
++import { cleanup, render, screen } from '@testing-library/react';
++import { afterEach, describe, expect, it } from 'vitest';
++import { assessmentTemplate, defaultMaturityBands, generateRecommendations, type DimensionScore } from '@assessment/contracts';
++import { RecommendationGroups } from './RecommendationGroups';
++
++afterEach(cleanup);
++
++function score(index: number, scorePercentage: number, maturityLevel: DimensionScore['maturityLevel']): DimensionScore {
++  const dimension = assessmentTemplate.dimensions[index];
++  return { dimensionId: dimension.id, dimensionName: dimension.name, scorePercentage, maturityLevel, itemCount: 5 };
++}
++
++describe('RecommendationGroups', () => {
++  it('groups actions by priority and shows what is needed to reach the next level', () => {
++    const recommendations = generateRecommendations([score(5, 20, 'Initial'), score(2, 56, 'Defined'), score(0, 72, 'Managed')], defaultMaturityBands);
++    render(<RecommendationGroups recommendations={recommendations} />);
++    expect(screen.getByRole('heading', { name: 'Act now' })).toBeTruthy();
++    expect(screen.getByRole('heading', { name: 'Plan next' })).toBeTruthy();
++    expect(screen.getByRole('heading', { name: 'Sustain and refine' })).toBeTruthy();
++    expect(screen.getByText(/Score more than 60% in this dimension \(currently 56%\)/)).toBeTruthy();
++  });
++
++  it('shows an empty state when nothing is recommended', () => {
++    render(<RecommendationGroups recommendations={[]} />);
++    expect(screen.getByText('No improvement actions needed')).toBeTruthy();
++  });
++});
+diff --git a/apps/web/src/components/RecommendationGroups.tsx b/apps/web/src/components/RecommendationGroups.tsx
+new file mode 100644
+index 0000000..c9b68b9
+--- /dev/null
++++ b/apps/web/src/components/RecommendationGroups.tsx
+@@ -0,0 +1,34 @@
++import type { Recommendation, RecommendationPriority } from '@assessment/contracts';
++
++const groups: { priority: RecommendationPriority; title: string; description: string }[] = [
++  { priority: 'high', title: 'Act now', description: 'Dimensions at the Initial or Developing level.' },
++  { priority: 'medium', title: 'Plan next', description: 'Dimensions at the Defined level.' },
++  { priority: 'low', title: 'Sustain and refine', description: 'Dimensions at the Managed level.' },
++];
++
++export function RecommendationGroups({ recommendations }: { recommendations: readonly Recommendation[] }) {
++  if (recommendations.length === 0) {
++    return <article className="panel empty-state"><h2>No improvement actions needed</h2><p>Every dimension scored above the range where recommendations apply.</p></article>;
++  }
++  return <div className="roadmap">
++    {groups.map((group) => {
++      const items = recommendations.filter((item) => item.priority === group.priority);
++      if (items.length === 0) return null;
++      return <section className="roadmap-group" key={group.priority} aria-labelledby={`roadmap-${group.priority}`}>
++        <h2 id={`roadmap-${group.priority}`}>{group.title}</h2>
++        <p className="roadmap-description">{group.description}</p>
++        <div className="recommendation-list">
++          {items.map((item) => <article className="panel recommendation-card" key={item.id}>
++            <p className="recommendation-meta"><span className={`priority-tag ${item.priority}`}>{group.title}</span> {item.dimensionName} · {Math.round(item.scorePercentage)}% · {item.maturityLevel}</p>
++            <h3>{item.action}</h3>
++            <dl>
++              <div><dt>Weakness</dt><dd>{item.weakness}</dd></div>
++              <div><dt>Expected benefit</dt><dd>{item.benefit}</dd></div>
++              <div><dt>To reach {item.nextLevel}</dt><dd>Score more than {Math.round(item.scorePercentage + item.pointsToNextLevel)}% in this dimension (currently {Math.round(item.scorePercentage)}%).</dd></div>
++            </dl>
++          </article>)}
++        </div>
++      </section>;
++    })}
++  </div>;
++}
+diff --git a/apps/web/src/pages/RecommendationsPage.tsx b/apps/web/src/pages/RecommendationsPage.tsx
+index 0030d1a..0c87095 100644
+--- a/apps/web/src/pages/RecommendationsPage.tsx
++++ b/apps/web/src/pages/RecommendationsPage.tsx
+@@ -1,5 +1,6 @@
+ import { useEffect, useState } from 'react';
+-import type { AssessmentRecord } from '@assessment/contracts';
++import { generateRecommendations, recommendationContentStatus, type AssessmentRecord } from '@assessment/contracts';
++import { RecommendationGroups } from '../components/RecommendationGroups';
+ import { getAssessmentHistory } from '../services/assessment-service';
+ 
+ function displayDate(value: string): string { return new Intl.DateTimeFormat('en-NG', { dateStyle: 'long' }).format(new Date(value)); }
+@@ -20,6 +21,9 @@ export function RecommendationsPage() {
+     <div className="page-heading"><div><p className="eyebrow">Recommendations</p><h1>Actions to improve readiness</h1><p>Recommendations are tied to a specific assessment and date.</p></div></div>
+     {error && <p className="page-error" role="alert">{error}</p>}
+     {records.length > 0 && <div className="history-controls"><label htmlFor="recommendation-history">Assessment date</label><select id="recommendation-history" value={record?.id} onChange={(event) => setSelectedId(event.target.value)}>{records.map((item) => <option value={item.id} key={item.id}>{displayDate(item.submittedAt)} · {Math.round(item.overallScore)}%</option>)}</select></div>}
+-    {!record ? <article className="panel empty-state"><h2>Complete an assessment first</h2><p>Recommendations will be associated with a completed assessment.</p></article> : <article className="panel empty-state"><span aria-hidden="true">✦</span><h2>Recommendation guidance is being prepared</h2><p>Your {displayDate(record.submittedAt)} assessment is saved. Approved recommendation rules and content have not been provided yet, so this page does not make up actions or advice.</p></article>}
++    {!record ? <article className="panel empty-state"><h2>Complete an assessment first</h2><p>Recommendations will be associated with a completed assessment.</p></article> : <>
++      {recommendationContentStatus === 'draft' && <p className="draft-note" role="note">Draft guidance. These actions are generated by fixed rules from your dimension scores and have not yet been validated by expert review.</p>}
++      <RecommendationGroups recommendations={generateRecommendations(record.dimensionScores, record.templateSnapshot.maturityBands)} />
++    </>}
+   </section>;
+ }
+diff --git a/apps/web/src/pages/ReportsPage.tsx b/apps/web/src/pages/ReportsPage.tsx
+index 3dfbe7f..605b29f 100644
+--- a/apps/web/src/pages/ReportsPage.tsx
++++ b/apps/web/src/pages/ReportsPage.tsx
+@@ -1,5 +1,6 @@
+ import { useEffect, useState } from 'react';
+-import type { AssessmentRecord, OrganisationProfile } from '@assessment/contracts';
++import { generateRecommendations, qualifyOverallResult, rankDimensions, recommendationContentStatus, type AssessmentRecord, type OrganisationProfile } from '@assessment/contracts';
++import { RecommendationGroups } from '../components/RecommendationGroups';
+ import { useAuth } from '../auth/AuthProvider';
+ import { RadarChart } from '../components/RadarChart';
+ import { getAssessmentHistory } from '../services/assessment-service';
+@@ -28,10 +29,10 @@ export function ReportsPage() {
+     {records.length > 1 && <div className="history-controls screen-only"><label htmlFor="report-history">Assessment date</label><select id="report-history" value={record?.id} onChange={(event) => setSelectedId(event.target.value)}>{records.map((item) => <option key={item.id} value={item.id}>{displayDate(item.submittedAt)} · {Math.round(item.overallScore)}%</option>)}</select></div>}
+     {!record ? <article className="panel empty-state"><span aria-hidden="true">📄</span><h2>No report data yet</h2><p>Complete an Admin assessment before generating a report.</p></article> : <article className="report-sheet">
+       <header className="report-header"><div><p className="eyebrow">UCCMM Assessment Toolkit</p><h1>Change management maturity report</h1><p>{organisation?.name ?? user?.organizationName}</p></div><div><b>{displayDate(record.submittedAt)}</b><p>Assessment {record.assessmentVersion}</p></div></header>
+-      <div className="report-meta"><article><small>Overall score</small><strong>{Math.round(record.overallScore)}%</strong></article><article><small>Maturity level</small><strong>{record.overallMaturityLevel}</strong></article><article><small>ERP platform</small><strong>{organisation?.erpPlatform ?? '—'}</strong></article><article><small>Implementation stage</small><strong>{organisation?.implementationStage.replaceAll('_', ' ') ?? '—'}</strong></article></div>
++      <div className="report-meta"><article><small>Overall score</small><strong>{Math.round(record.overallScore)}%</strong></article><article><small>Maturity level</small><strong>{qualifyOverallResult(record).label}</strong></article><article><small>ERP platform</small><strong>{organisation?.erpPlatform ?? '—'}</strong></article><article><small>Implementation stage</small><strong>{organisation?.implementationStage.replaceAll('_', ' ') ?? '—'}</strong></article></div>
+       <article className="panel"><h2>Maturity by dimension</h2><RadarChart scores={record.dimensionScores} /></article>
+-      <article className="panel dimension-panel report-dimension-list"><h2>Dimension scores</h2>{record.dimensionScores.map((dimension) => <div className="score-row" key={dimension.dimensionId}><div><span>{dimension.dimensionName}</span><b>{Math.round(dimension.scorePercentage)}%</b></div><div className="bar"><i style={{ width: `${dimension.scorePercentage}%` }} /></div><small>{dimension.maturityLevel}</small></div>)}</article>
+-      <article className="panel report-recommendations"><h2>Recommendations</h2><p>Approved recommendation rules and content have not been provided yet. Recommendations are not included in this report.</p></article>
++      <article className="panel dimension-panel report-dimension-list"><h2>Dimension scores, weakest first</h2>{rankDimensions(record.dimensionScores).map((dimension) => <div className="score-row" key={dimension.dimensionId}><div><span>{dimension.dimensionName}</span><b>{Math.round(dimension.scorePercentage)}%</b></div><div className="bar"><i style={{ width: `${dimension.scorePercentage}%` }} /></div><small>{dimension.maturityLevel}</small></div>)}</article>
++      <section className="report-recommendations"><h2>Recommendations</h2>{recommendationContentStatus === 'draft' && <p className="draft-note" role="note">Draft guidance generated by fixed rules from the dimension scores. It has not yet been validated by expert review.</p>}<RecommendationGroups recommendations={generateRecommendations(record.dimensionScores, record.templateSnapshot.maturityBands)} /></section>
+       <p className="privacy-note">This report contains the Admin assessment only. It does not contain identifiable stakeholder answers or individual results.</p>
+     </article>}
+   </section>;
+diff --git a/apps/web/src/pages/ResultsPage.tsx b/apps/web/src/pages/ResultsPage.tsx
+index c8a1276..366de3d 100644
+--- a/apps/web/src/pages/ResultsPage.tsx
++++ b/apps/web/src/pages/ResultsPage.tsx
+@@ -1,6 +1,6 @@
+ import { useEffect, useState } from 'react';
+ import { useNavigate } from 'react-router-dom';
+-import type { AssessmentRecord } from '@assessment/contracts';
++import { qualifyOverallResult, rankDimensions, type AssessmentRecord } from '@assessment/contracts';
+ import { useAuth } from '../auth/AuthProvider';
+ import { RadarChart } from '../components/RadarChart';
+ import { getAssessmentHistory } from '../services/assessment-service';
+@@ -28,14 +28,16 @@ export function ResultsPage() {
+     <article className="panel empty-state"><span aria-hidden="true">📊</span><h2>Your maturity profile will appear here</h2><p>Your submitted answers are scored across all six UCCMM dimensions.</p><button className="button" onClick={() => navigate('/assessment')}>Start assessment</button></article>
+   </section>;
+ 
++  const qualification = qualifyOverallResult(record);
++
+   return <section>
+     <div className="page-heading"><div><p className="eyebrow">{user?.role === 'admin' ? 'Admin assessment' : 'Your results'}</p><h1>Maturity profile</h1><p>Submitted {formatDate(record.submittedAt)}.</p></div></div>
+     {records.length > 1 && <div className="history-controls screen-only"><label htmlFor="result-history">Past assessments</label><select id="result-history" value={record.id} onChange={(event) => setSelectedId(event.target.value)}>{records.map((item) => <option value={item.id} key={item.id}>{formatDate(item.submittedAt)} · {Math.round(item.overallScore)}%</option>)}</select></div>}
+     <div className="results-grid results-overview">
+-      <article className="panel score-panel"><h2>Overall maturity score</h2><div className="score-ring"><strong>{displayPercentage(record.overallScore)}</strong></div><b>{record.overallMaturityLevel}</b><p>Calculated from all {Object.keys(record.responses).length} UCCMM responses.</p></article>
++      <article className="panel score-panel"><h2>Overall maturity score</h2><div className="score-ring"><strong>{displayPercentage(record.overallScore)}</strong></div><b>{record.overallMaturityLevel}</b>{qualification.severity !== 'none' && <p className={`qualifier ${qualification.severity}`}>{qualification.label}</p>}<p>Calculated from all {Object.keys(record.responses).length} UCCMM responses.</p></article>
+       <article className="panel radar-panel"><h2>Maturity by dimension</h2><RadarChart scores={record.dimensionScores} /></article>
+     </div>
+-    <article className="panel dimension-panel result-dimension-panel"><h2>Dimension scores</h2>{record.dimensionScores.map((dimension) => <div className="score-row" key={dimension.dimensionId}>
++    <article className="panel dimension-panel result-dimension-panel"><h2>Dimension scores, weakest first</h2>{rankDimensions(record.dimensionScores).map((dimension) => <div className="score-row" key={dimension.dimensionId}>
+       <div><span>{dimension.dimensionName}</span><b>{displayPercentage(dimension.scorePercentage)}</b></div>
+       <div className="bar"><i style={{ width: `${dimension.scorePercentage}%` }} /></div><small>{dimension.maturityLevel}</small>
+     </div>)}</article>
+diff --git a/packages/contracts/src/index.ts b/packages/contracts/src/index.ts
+index 694aec1..77d522b 100644
+--- a/packages/contracts/src/index.ts
++++ b/packages/contracts/src/index.ts
+@@ -346,3 +346,4 @@ export function createAssessmentRecord(input: {
+   };
+   return freezeRecursively(assessmentRecordSchema.parse(record));
+ }
++export * from './recommendations';
+diff --git a/packages/contracts/src/recommendations.test.ts b/packages/contracts/src/recommendations.test.ts
+new file mode 100644
+index 0000000..973dd2f
+--- /dev/null
++++ b/packages/contracts/src/recommendations.test.ts
+@@ -0,0 +1,102 @@
++import { describe, expect, it } from 'vitest';
++import {
++  assessmentTemplate,
++  defaultMaturityBands,
++  generateRecommendations,
++  qualifyOverallResult,
++  recommendationLibrary,
++  type DimensionScore,
++  type MaturityLevel,
++} from './index';
++
++function score(index: number, scorePercentage: number, maturityLevel: MaturityLevel): DimensionScore {
++  const dimension = assessmentTemplate.dimensions[index];
++  return { dimensionId: dimension.id, dimensionName: dimension.name, scorePercentage, maturityLevel, itemCount: 5 };
++}
++
++describe('recommendation library', () => {
++  it('has a foundation, structure and optimise tier for each of the six dimensions', () => {
++    for (const dimension of assessmentTemplate.dimensions) {
++      const tiers = recommendationLibrary.filter((entry) => entry.dimensionId === dimension.id).map((entry) => entry.maxLevel);
++      expect(tiers).toEqual(['Developing', 'Defined', 'Managed']);
++    }
++  });
++
++  it('has unique ids and no empty fields', () => {
++    expect(new Set(recommendationLibrary.map((entry) => entry.id)).size).toBe(recommendationLibrary.length);
++    for (const entry of recommendationLibrary) {
++      expect([entry.weakness, entry.action, entry.benefit].every((text) => text.trim().length > 0)).toBe(true);
++    }
++  });
++});
++
++describe('generateRecommendations', () => {
++  const scores = [
++    score(0, 76, 'Managed'), score(1, 64, 'Managed'), score(2, 60, 'Defined'),
++    score(3, 52, 'Defined'), score(4, 68, 'Managed'), score(5, 48, 'Defined'),
++  ];
++
++  it('orders by priority, then lowest score (worked example: Defined dimensions first)', () => {
++    const result = generateRecommendations(scores, defaultMaturityBands);
++    expect(result.map((r) => r.priority)).toEqual(['medium', 'medium', 'medium', 'low', 'low', 'low']);
++    expect(result.slice(0, 3).map((r) => r.dimensionId)).toEqual(['resilience', 'readiness', 'requirements']);
++  });
++
++  it('uses the tier matching the dimension level', () => {
++    const resilience = generateRecommendations(scores, defaultMaturityBands).find((r) => r.dimensionId === 'resilience');
++    expect(resilience?.id).toBe('resilience-structure');
++    expect(resilience?.nextLevel).toBe('Managed');
++  });
++
++  it('reports the points needed to exceed the current band', () => {
++    const resilience = generateRecommendations(scores, defaultMaturityBands).find((r) => r.dimensionId === 'resilience');
++    expect(resilience?.pointsToNextLevel).toBeCloseTo(12, 9);
++  });
++
++  it('marks Initial and Developing dimensions high priority with the foundation tier', () => {
++    const result = generateRecommendations([score(5, 20, 'Initial'), score(0, 36, 'Developing')], defaultMaturityBands);
++    expect(result.map((r) => [r.dimensionId, r.priority, r.id])).toEqual([
++      ['resilience', 'high', 'resilience-foundation'],
++      ['leadership', 'high', 'leadership-foundation'],
++    ]);
++  });
++
++  it('gives no recommendations above 80% or below the lower bound', () => {
++    expect(generateRecommendations([score(0, 84, 'Optimising')], defaultMaturityBands)).toEqual([]);
++    expect(generateRecommendations([score(0, 5, 'Initial')], defaultMaturityBands)).toEqual([]);
++  });
++
++  it('includes a dimension scoring exactly 80% (Managed)', () => {
++    expect(generateRecommendations([score(0, 80, 'Managed')], defaultMaturityBands)).toHaveLength(1);
++  });
++
++  it('is deterministic for the same input', () => {
++    expect(generateRecommendations(scores, defaultMaturityBands)).toEqual(generateRecommendations(scores, defaultMaturityBands));
++  });
++});
++
++describe('qualifyOverallResult', () => {
++  it('reports a critical gap when a dimension is two or more levels below the overall level (Report 3.5.5)', () => {
++    const result = qualifyOverallResult({
++      overallMaturityLevel: 'Managed',
++      dimensionScores: [score(0, 90, 'Optimising'), score(3, 32, 'Developing'), score(1, 75, 'Managed')],
++    });
++    expect(result.severity).toBe('critical');
++    expect(result.label).toBe('Managed with a critical gap in Organisational and User Readiness');
++  });
++
++  it('reports a weak dimension for the worked example (Managed overall, weakest Defined)', () => {
++    const result = qualifyOverallResult({
++      overallMaturityLevel: 'Managed',
++      dimensionScores: [score(0, 76, 'Managed'), score(1, 64, 'Managed'), score(2, 60, 'Defined'), score(3, 52, 'Defined'), score(4, 68, 'Managed'), score(5, 48, 'Defined')],
++    });
++    expect(result.severity).toBe('weak');
++    expect(result.weakestDimension.dimensionId).toBe('resilience');
++    expect(result.strongestDimension.dimensionId).toBe('leadership');
++  });
++
++  it('adds no qualifier when no dimension is below the overall level', () => {
++    const result = qualifyOverallResult({ overallMaturityLevel: 'Defined', dimensionScores: [score(0, 60, 'Defined'), score(1, 64, 'Managed')] });
++    expect(result).toMatchObject({ severity: 'none', label: 'Defined' });
++  });
++});
+diff --git a/packages/contracts/src/recommendations.ts b/packages/contracts/src/recommendations.ts
+new file mode 100644
+index 0000000..a2ef493
+--- /dev/null
++++ b/packages/contracts/src/recommendations.ts
+@@ -0,0 +1,247 @@
++import type { AssessmentScoreSummary, DimensionScore, MaturityBand, MaturityLevel } from './index';
++
++/**
++ * Rule chain (Report 3.5.6): response -> dimension score -> maturity level
++ * -> capability gap -> priority -> recommendation. No machine learning; every
++ * output traces to the score and level that triggered it.
++ */
++
++const levelOrder: readonly MaturityLevel[] = ['Initial', 'Developing', 'Defined', 'Managed', 'Optimising'];
++
++function levelIndex(level: MaturityLevel): number {
++  return levelOrder.indexOf(level);
++}
++
++export type RecommendationPriority = 'high' | 'medium' | 'low';
++
++export interface RecommendationContent {
++  id: string;
++  dimensionId: string;
++  /** Applies to a dimension whose level is at or below this level (tiers are exclusive, see selectTier). */
++  maxLevel: MaturityLevel;
++  weakness: string;
++  action: string;
++  benefit: string;
++}
++
++export interface Recommendation extends RecommendationContent {
++  dimensionName: string;
++  scorePercentage: number;
++  maturityLevel: MaturityLevel;
++  priority: RecommendationPriority;
++  nextLevel: MaturityLevel;
++  /** The dimension score must exceed its current band's upper bound by more than 0 to reach nextLevel. */
++  pointsToNextLevel: number;
++}
++
++/**
++ * DRAFT CONTENT. Derived from the six dimension definitions, the 30 criteria and the
++ * examples in Report 3.5.6. It has not been through the Delphi review (Objective 3)
++ * and must be approved before it is presented to organisations as validated advice.
++ */
++export const recommendationContentStatus = 'draft' as const;
++
++export const recommendationLibrary: readonly RecommendationContent[] = [
++  {
++    id: 'leadership-foundation', dimensionId: 'leadership', maxLevel: 'Developing',
++    weakness: 'Executive sponsorship and ownership of change management are informal or unassigned.',
++    action: 'Name an executive sponsor, assign a change management lead, and set aside a change management budget that is separate from technical costs.',
++    benefit: 'Clear ownership and funding stop change work from being dropped when the technical schedule is under pressure.',
++  },
++  {
++    id: 'leadership-structure', dimensionId: 'leadership', maxLevel: 'Defined',
++    weakness: 'Governance exists but is not consistently tied to decisions or to organisational strategy.',
++    action: 'Set up a steering group with a fixed meeting cadence and a documented escalation path for change issues, and record how the ERP objectives support organisational strategy.',
++    benefit: 'Change-related issues are resolved quickly, and leaders can show how the ERP serves strategic goals.',
++  },
++  {
++    id: 'leadership-optimise', dimensionId: 'leadership', maxLevel: 'Managed',
++    weakness: 'Leadership oversight is not yet driven by measures.',
++    action: 'Report change readiness and adoption indicators to the steering group each cycle, and use them to adjust sponsor messaging and budget.',
++    benefit: 'Leadership decisions respond to evidence, which sustains support after go-live.',
++  },
++  {
++    id: 'communication-foundation', dimensionId: 'communication', maxLevel: 'Developing',
++    weakness: 'Affected stakeholders are not systematically identified and communication is ad hoc.',
++    action: 'List every affected user group and publish a communication plan that explains why the ERP is being introduced, what changes for each group, and when.',
++    benefit: 'Users hear the reason for the change from the organisation first, which reduces resistance driven by rumour.',
++  },
++  {
++    id: 'communication-structure', dimensionId: 'communication', maxLevel: 'Defined',
++    weakness: 'Communication is planned but not tailored to roles or open to two-way feedback.',
++    action: 'Write role-specific messages for each department, and open a defined channel for questions and concerns with a stated response time.',
++    benefit: 'Concerns surface early, and users see that their input is acted on.',
++  },
++  {
++    id: 'communication-optimise', dimensionId: 'communication', maxLevel: 'Managed',
++    weakness: 'Stakeholder feedback is collected but not analysed for patterns.',
++    action: 'Track concerns raised and resolved by department, and review communication effectiveness at each project milestone.',
++    benefit: 'Communication effort goes to the groups that need it most.',
++  },
++  {
++    id: 'requirements-foundation', dimensionId: 'requirements', maxLevel: 'Developing',
++    weakness: 'Requirements are captured informally and changes to them are not controlled.',
++    action: 'Document requirements for each business process, have business owners sign them off, and introduce a written change-request form.',
++    benefit: 'The ERP configuration reflects real workflows, which reduces rework after go-live.',
++  },
++  {
++    id: 'requirements-structure', dimensionId: 'requirements', maxLevel: 'Defined',
++    weakness: 'A change process exists but impact assessment and traceability are inconsistent.',
++    action: 'Require an impact assessment before any requirements change is approved, and trace each configuration decision to a documented requirement.',
++    benefit: 'Scope decisions are defensible, and configuration errors are easier to diagnose.',
++  },
++  {
++    id: 'requirements-optimise', dimensionId: 'requirements', maxLevel: 'Managed',
++    weakness: 'Process alignment is not reviewed after deployment.',
++    action: 'Compare live ERP processes with documented workflows after go-live, and feed the gaps back into the requirements register.',
++    benefit: 'The ERP keeps matching how the business actually works.',
++  },
++  {
++    id: 'readiness-foundation', dimensionId: 'readiness', maxLevel: 'Developing',
++    weakness: 'Organisational and user readiness has not been formally assessed.',
++    action: 'Run a formal readiness assessment before the next implementation phase, covering resources, user understanding of project scope, and expected sources of resistance.',
++    benefit: 'Risks to adoption are found while there is still time to address them.',
++  },
++  {
++    id: 'readiness-structure', dimensionId: 'readiness', maxLevel: 'Defined',
++    weakness: 'Readiness is assessed but users are not involved in early planning.',
++    action: 'Involve representatives from each affected department in planning and design workshops, and repeat the readiness check before go-live.',
++    benefit: 'Users who help shape the change are better prepared and more likely to support it.',
++  },
++  {
++    id: 'readiness-optimise', dimensionId: 'readiness', maxLevel: 'Managed',
++    weakness: 'Readiness is not tracked as a measure over time.',
++    action: 'Track readiness indicators such as user confidence and understanding by department, and act on groups that fall behind.',
++    benefit: 'Support is targeted before go-live instead of after adoption problems appear.',
++  },
++  {
++    id: 'training-foundation', dimensionId: 'training', maxLevel: 'Developing',
++    weakness: 'Training is generic and support after go-live is unplanned.',
++    action: 'Run a training needs analysis, build role-based training content, and set up a support channel with a defined response time before go-live.',
++    benefit: 'Users can do their actual jobs in the new system from the first week.',
++  },
++  {
++    id: 'training-structure', dimensionId: 'training', maxLevel: 'Defined',
++    weakness: 'Training exists but is not blended, repeated, or tested with users.',
++    action: 'Provide blended learning materials that stay available after sessions end, schedule refresher training after go-live, and include users in pre-go-live testing.',
++    benefit: 'Skills are retained, and usability problems are caught before they affect operations.',
++  },
++  {
++    id: 'training-optimise', dimensionId: 'training', maxLevel: 'Managed',
++    weakness: 'The effectiveness of training and support is not measured.',
++    action: 'Measure training completion, user confidence, support response times and recurring workarounds, and use the results to revise training and configuration.',
++    benefit: 'Training and support improve continuously, and workarounds are removed at the source.',
++  },
++  {
++    id: 'resilience-foundation', dimensionId: 'resilience', maxLevel: 'Developing',
++    weakness: 'There is no plan for managing power or connectivity disruption during the ERP project.',
++    action: 'Document an outage plan: arrange backup power for critical implementation activities, provide downloadable training materials, and define procedures for temporary system unavailability.',
++    benefit: 'Implementation and training continue through outages instead of stalling.',
++  },
++  {
++    id: 'resilience-structure', dimensionId: 'resilience', maxLevel: 'Defined',
++    weakness: 'Outage arrangements exist but alternative channels and lessons learned are not formalised.',
++    action: 'Add alternative communication channels and scheduled in-person support sessions, and hold a documented lessons-learned review at each project phase.',
++    benefit: 'Support reaches users who are offline, and the project learns from each disruption.',
++  },
++  {
++    id: 'resilience-optimise', dimensionId: 'resilience', maxLevel: 'Managed',
++    weakness: 'Reassessment of change management maturity is not scheduled.',
++    action: 'Reassess change management maturity on a fixed schedule and use each result to plan the next set of improvement actions.',
++    benefit: 'Improvement becomes a routine practice instead of a one-time exercise.',
++  },
++];
++
++/** Dimensions in this score range receive recommendations (README: 10% to 80%). */
++export const defaultRecommendationRange = { minScore: 10, maxScore: 80 } as const;
++
++function priorityFor(level: MaturityLevel): RecommendationPriority {
++  const index = levelIndex(level);
++  if (index <= 1) return 'high';
++  return index === 2 ? 'medium' : 'low';
++}
++
++/** Picks the single tier whose maxLevel is the lowest one that still covers the dimension's level. */
++function selectTier(entries: readonly RecommendationContent[], level: MaturityLevel): RecommendationContent[] {
++  const covering = entries.filter((entry) => levelIndex(entry.maxLevel) >= levelIndex(level));
++  if (covering.length === 0) return [];
++  const lowest = Math.min(...covering.map((entry) => levelIndex(entry.maxLevel)));
++  return covering.filter((entry) => levelIndex(entry.maxLevel) === lowest);
++}
++
++const priorityRank: Record<RecommendationPriority, number> = { high: 0, medium: 1, low: 2 };
++
++export function generateRecommendations(
++  dimensionScores: readonly DimensionScore[],
++  bands: readonly MaturityBand[],
++  options: { minScore?: number; maxScore?: number; library?: readonly RecommendationContent[] } = {},
++): Recommendation[] {
++  const { minScore, maxScore } = { ...defaultRecommendationRange, ...options };
++  const library = options.library ?? recommendationLibrary;
++  const keyed: { recommendation: Recommendation; order: number }[] = [];
++
++  dimensionScores.forEach((dimension, order) => {
++    const { scorePercentage, maturityLevel } = dimension;
++    if (scorePercentage < minScore || scorePercentage > maxScore) return;
++    const nextLevel = levelOrder[levelIndex(maturityLevel) + 1];
++    if (!nextLevel) return;
++    const currentBand = bands.find((band) => band.level === maturityLevel);
++    const pointsToNextLevel = currentBand ? Math.max(0, currentBand.upperBound - scorePercentage) : 0;
++    const matches = selectTier(library.filter((entry) => entry.dimensionId === dimension.dimensionId), maturityLevel);
++    matches.forEach((entry) => keyed.push({
++      order,
++      recommendation: {
++        ...entry,
++        dimensionName: dimension.dimensionName,
++        scorePercentage,
++        maturityLevel,
++        priority: priorityFor(maturityLevel),
++        nextLevel,
++        pointsToNextLevel,
++      },
++    }));
++  });
++
++  return keyed
++    .sort((first, second) => priorityRank[first.recommendation.priority] - priorityRank[second.recommendation.priority]
++      || first.recommendation.scorePercentage - second.recommendation.scorePercentage || first.order - second.order)
++    .map(({ recommendation }) => recommendation);
++}
++
++/** Dimensions from lowest score to highest; equal scores keep their original order (Report TC-R1). */
++export function rankDimensions<T extends Pick<DimensionScore, 'scorePercentage'>>(scores: readonly T[]): T[] {
++  return scores.map((score, order) => ({ score, order }))
++    .sort((first, second) => first.score.scorePercentage - second.score.scorePercentage || first.order - second.order)
++    .map(({ score }) => score);
++}
++
++export type QualificationSeverity = 'none' | 'weak' | 'critical';
++
++export interface OverallQualification {
++  severity: QualificationSeverity;
++  weakestDimension: DimensionScore;
++  strongestDimension: DimensionScore;
++  label: string;
++}
++
++/**
++ * Report 3.5.5: a strong overall score can hide a serious weakness, so the overall level is
++ * never reported in isolation. A dimension two or more levels below the overall level is a
++ * critical gap; one level below is a weak dimension. (Rule-based, needs no user-set target.)
++ */
++export function qualifyOverallResult(
++  summary: Pick<AssessmentScoreSummary, 'dimensionScores' | 'overallMaturityLevel'>,
++): OverallQualification {
++  if (summary.dimensionScores.length === 0) throw new Error('At least one dimension score is required.');
++  const ranked = rankDimensions(summary.dimensionScores);
++  const weakestDimension = ranked[0];
++  const strongestDimension = ranked[ranked.length - 1];
++  const levelsBelow = levelIndex(summary.overallMaturityLevel) - levelIndex(weakestDimension.maturityLevel);
++  if (levelsBelow >= 2) {
++    return { severity: 'critical', weakestDimension, strongestDimension, label: `${summary.overallMaturityLevel} with a critical gap in ${weakestDimension.dimensionName}` };
++  }
++  if (levelsBelow === 1) {
++    return { severity: 'weak', weakestDimension, strongestDimension, label: `${summary.overallMaturityLevel} overall, weakest in ${weakestDimension.dimensionName}` };
++  }
++  return { severity: 'none', weakestDimension, strongestDimension, label: summary.overallMaturityLevel };
++}
+diff --git a/packages/contracts/src/scoring-acceptance.test.ts b/packages/contracts/src/scoring-acceptance.test.ts
+new file mode 100644
+index 0000000..fe4bc95
+--- /dev/null
++++ b/packages/contracts/src/scoring-acceptance.test.ts
+@@ -0,0 +1,112 @@
++import { describe, expect, it } from 'vitest';
++import {
++  assessmentTemplate,
++  calculateAssessmentScores,
++  classifyMaturity,
++  rankDimensions,
++  type AssessmentResponses,
++} from './index';
++
++const questionIdsByDimension = assessmentTemplate.dimensions.map((dimension) => dimension.questions.map((question) => question.id));
++
++function uniform(value: number): AssessmentResponses {
++  return Object.fromEntries(questionIdsByDimension.flat().map((id) => [id, value]));
++}
++
++/** Five items per dimension with the given item values, one array per dimension. */
++function fromDimensionItems(items: readonly (readonly number[])[]): AssessmentResponses {
++  return Object.fromEntries(items.flatMap((values, dimension) => values.map((value, item) => [questionIdsByDimension[dimension][item], value])));
++}
++
++// Report 4.2.2 worked example: dimension totals 19, 16, 15, 13, 17, 12.
++const workedExample = fromDimensionItems([
++  [4, 4, 4, 4, 3],
++  [3, 3, 3, 3, 4],
++  [3, 3, 3, 3, 3],
++  [3, 3, 3, 2, 2],
++  [4, 3, 4, 3, 3],
++  [3, 3, 2, 2, 2],
++]);
++
++describe('Report Table 5.2: basic scoring', () => {
++  it('TC-S1 all responses 1: every dimension 20%, overall 20%, Initial', () => {
++    const result = calculateAssessmentScores(assessmentTemplate, uniform(1));
++    expect(result.dimensionScores.map((d) => d.scorePercentage)).toEqual(Array(6).fill(20));
++    expect(result.overallScore).toBe(20);
++    expect(result.overallMaturityLevel).toBe('Initial');
++  });
++
++  it('TC-S2 all responses 5: every dimension 100%, overall 100%, Optimising', () => {
++    const result = calculateAssessmentScores(assessmentTemplate, uniform(5));
++    expect(result.dimensionScores.map((d) => d.scorePercentage)).toEqual(Array(6).fill(100));
++    expect(result.overallScore).toBe(100);
++    expect(result.overallMaturityLevel).toBe('Optimising');
++  });
++
++  it('TC-S3 all responses 3: every dimension 60%, overall 60%, Defined', () => {
++    const result = calculateAssessmentScores(assessmentTemplate, uniform(3));
++    expect(result.dimensionScores.map((d) => d.scorePercentage)).toEqual(Array(6).fill(60));
++    expect(result.overallScore).toBe(60);
++    expect(result.overallMaturityLevel).toBe('Defined');
++  });
++
++  it('TC-S4 worked example: dimensions 76, 64, 60, 52, 68, 48; overall 61.33%; Managed', () => {
++    const result = calculateAssessmentScores(assessmentTemplate, workedExample);
++    result.dimensionScores.forEach((dimension, index) => expect(dimension.scorePercentage).toBeCloseTo([76, 64, 60, 52, 68, 48][index], 9));
++    expect(result.overallScore).toBeCloseTo(61.3333333, 6);
++    expect(result.overallMaturityLevel).toBe('Managed');
++  });
++
++  it('TC-S5 worked example dimension levels: Managed, Managed, Defined, Defined, Managed, Defined', () => {
++    const result = calculateAssessmentScores(assessmentTemplate, workedExample);
++    expect(result.dimensionScores.map((d) => d.maturityLevel)).toEqual(['Managed', 'Managed', 'Defined', 'Defined', 'Managed', 'Defined']);
++  });
++
++  it('TC-S6 equal weighting: overall equals the mean of the six dimension scores', () => {
++    const result = calculateAssessmentScores(assessmentTemplate, workedExample);
++    const mean = result.dimensionScores.reduce((sum, d) => sum + d.scorePercentage, 0) / 6;
++    expect(result.overallScore).toBeCloseTo(mean, 9);
++  });
++});
++
++describe('Report Table 5.2: classification boundaries', () => {
++  it('TC-B1 20.67% is above 20% and is Developing', () => expect(classifyMaturity(20.67)).toBe('Developing'));
++  it('TC-B2 40.00% is Developing', () => expect(classifyMaturity(40)).toBe('Developing'));
++  it('TC-B3 40.67% is above 40% and is Defined', () => expect(classifyMaturity(40.67)).toBe('Defined'));
++  it('TC-B4 60.67% is above 60% and is Managed', () => expect(classifyMaturity(60.67)).toBe('Managed'));
++  it('TC-B5 80.00% is Managed', () => expect(classifyMaturity(80)).toBe('Managed'));
++  it('TC-B6 80.67% is above 80% and is Optimising', () => expect(classifyMaturity(80.67)).toBe('Optimising'));
++});
++
++describe('Report Table 5.2: ranking', () => {
++  it('TC-R1 worked example ranks dimensions 6, 4, 3, 2, 5, 1 from lowest to highest', () => {
++    const { dimensionScores } = calculateAssessmentScores(assessmentTemplate, workedExample);
++    const order = rankDimensions(dimensionScores).map((d) => assessmentTemplate.dimensions.findIndex((dimension) => dimension.id === d.dimensionId) + 1);
++    expect(order).toEqual([6, 4, 3, 2, 5, 1]);
++  });
++
++  it('keeps original order for equal scores', () => {
++    const order = rankDimensions([{ scorePercentage: 50, id: 'a' }, { scorePercentage: 40, id: 'b' }, { scorePercentage: 50, id: 'c' }]).map((d) => d.id);
++    expect(order).toEqual(['b', 'a', 'c']);
++  });
++});
++
++describe('Report Table 5.2: validation', () => {
++  it('TC-V1 fewer than 30 responses are rejected', () => {
++    const partial = uniform(3);
++    delete partial[questionIdsByDimension[0][0]];
++    expect(() => calculateAssessmentScores(assessmentTemplate, partial)).toThrow('incomplete');
++  });
++
++  it('TC-V2 a response of 0 is rejected', () => {
++    expect(() => calculateAssessmentScores(assessmentTemplate, { ...uniform(3), [questionIdsByDimension[0][0]]: 0 })).toThrow();
++  });
++
++  it('TC-V3 a response of 6 is rejected', () => {
++    expect(() => calculateAssessmentScores(assessmentTemplate, { ...uniform(3), [questionIdsByDimension[0][0]]: 6 })).toThrow();
++  });
++
++  it('TC-V4 a non-integer response (3.5) is rejected', () => {
++    expect(() => calculateAssessmentScores(assessmentTemplate, { ...uniform(3), [questionIdsByDimension[0][0]]: 3.5 })).toThrow();
++  });
++});
+-- 
+2.43.0
+

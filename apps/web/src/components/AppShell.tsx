@@ -4,7 +4,8 @@ import { useAuth } from '../auth/AuthProvider';
 
 export function AppShell() {
   const navigate = useNavigate();
-  const { user, signOut } = useAuth();
+  const { user, signOut, offlineRecovery, disableOfflineRecovery, refresh } = useAuth();
+  const [retryBusy, setRetryBusy] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [logoutOpen, setLogoutOpen] = useState(false);
   const [logoutBusy, setLogoutBusy] = useState(false);
@@ -27,10 +28,21 @@ export function AppShell() {
     }
   };
 
+  const retry = async () => {
+    setRetryBusy(true);
+    try {
+      await refresh();
+    } finally {
+      setRetryBusy(false);
+    }
+  };
+
   return <div className="app-shell">
     <header className="app-header">
       <strong className="brand">UCCMM ASSESSMENT TOOLKIT</strong>
-      <nav className="top-nav" aria-label="Main navigation">{links.map(([to, label]) => <NavLink key={to} to={to} className={({ isActive }) => isActive ? 'active' : ''}>{label}</NavLink>)}</nav>
+      {offlineRecovery ? <div className="user-menu-wrap">
+        <button className="button secondary" onClick={disableOfflineRecovery}>Forget this device</button>
+      </div> : <><nav className="top-nav" aria-label="Main navigation">{links.map(([to, label]) => <NavLink key={to} to={to} className={({ isActive }) => isActive ? 'active' : ''}>{label}</NavLink>)}</nav>
       <div className="user-menu-wrap">
         <button className="user-menu" aria-expanded={menuOpen} onClick={() => setMenuOpen((open) => !open)}>
           <span aria-hidden="true">{(user?.fullName || user?.email || 'U').slice(0, 2).toUpperCase()}</span>
@@ -40,10 +52,16 @@ export function AppShell() {
           {role === 'admin' && <button role="menuitem" onClick={() => { setMenuOpen(false); navigate('/settings'); }}>Account settings</button>}
           <button role="menuitem" onClick={() => { setMenuOpen(false); setLogoutOpen(true); }}>Log out</button>
         </div>}
-      </div>
+      </div></>}
     </header>
-    <main className="shell-content"><Outlet /></main>
-    {logoutOpen && <div className="modal-backdrop logout-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !logoutBusy) setLogoutOpen(false); }}>
+    <main className="shell-content">
+      {offlineRecovery && <div className="offline-note">
+        <p role="status">Offline assessment recovery. Your session must be verified online before you can sync or submit.</p>
+        <button className="button secondary" disabled={retryBusy} onClick={() => void retry()}>{retryBusy ? 'Checking session…' : 'Retry connection'}</button>
+      </div>}
+      <Outlet />
+    </main>
+    {!offlineRecovery && logoutOpen && <div className="modal-backdrop logout-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !logoutBusy) setLogoutOpen(false); }}>
       <section className="logout-modal" role="dialog" aria-modal="true" aria-labelledby="logout-heading" aria-describedby="logout-description">
         <span className="logout-icon" aria-hidden="true">↪</span>
         <h2 id="logout-heading">Log out?</h2>

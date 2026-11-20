@@ -28,23 +28,31 @@ const db = () => openDB<ToolkitDB>(databaseName, 3, {
 
 export async function saveDraft(draft: AssessmentDraft): Promise<void> {
   const parsedDraft = assessmentDraftSchema.parse(draft);
-  await (await db()).put('drafts', parsedDraft);
+  // Ask the browser to flush the transaction before showing the draft as saved.
+  const transaction = (await db()).transaction('drafts', 'readwrite', { durability: 'strict' });
+  await Promise.all([transaction.store.put(parsedDraft), transaction.done]);
 }
 
-export async function getDraft(respondentKey: string, assessmentVersion: string): Promise<AssessmentDraft | undefined> {
+type DraftScope = Pick<AssessmentDraft, 'organisationId' | 'respondentType'>;
+
+function matchesScope(draft: DraftScope, scope?: DraftScope): boolean {
+  return !scope || (draft.organisationId === scope.organisationId && draft.respondentType === scope.respondentType);
+}
+
+export async function getDraft(respondentKey: string, assessmentVersion: string, scope?: DraftScope): Promise<AssessmentDraft | undefined> {
   const drafts = await (await db()).getAllFromIndex('drafts', 'byRespondentVersion', [respondentKey, assessmentVersion]);
   // Older clients could create multiple drafts because lookups did not match the stored UUID key.
   for (const draft of drafts.sort((first, second) => second.updatedAt.localeCompare(first.updatedAt))) {
     const result = assessmentDraftSchema.safeParse(draft);
-    if (result.success) return result.data;
+    if (result.success && matchesScope(result.data, scope)) return result.data;
   }
   return undefined;
 }
 
-export async function clearDraft(respondentKey: string, assessmentVersion: string): Promise<void> {
+export async function clearDraft(respondentKey: string, assessmentVersion: string, scope?: DraftScope): Promise<void> {
   const transaction = (await db()).transaction('drafts', 'readwrite');
-  const keys = await transaction.store.index('byRespondentVersion').getAllKeys([respondentKey, assessmentVersion]);
-  await Promise.all([...keys.map((key) => transaction.store.delete(key)), transaction.done]);
+  const drafts = await transaction.store.index('byRespondentVersion').getAll([respondentKey, assessmentVersion]);
+  await Promise.all([...drafts.filter((draft) => matchesScope(draft, scope)).map(({ id }) => transaction.store.delete(id)), transaction.done]);
 }
 
 export async function saveRecord(record: AssessmentRecord, respondentKey: string): Promise<void> {

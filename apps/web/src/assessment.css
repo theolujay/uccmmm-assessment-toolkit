@@ -57,3 +57,36 @@ button:disabled{cursor:not-allowed;opacity:.55}.loading-state{display:grid;place
 .logout-actions .button.secondary{background:#f3f3f3;color:#101828}
 .logout-actions .logout-confirm{background:#ed3f36}
 @media(max-width:760px){.participant-toolbar{grid-template-columns:1fr}.participant-filters{flex-wrap:wrap}.participant-filters input[type="search"]{width:100%;min-width:0}.participant-filters select{flex:1}.participant-pagination,.participant-pagination>div{flex-wrap:wrap;justify-content:center}.admin-empty-state{min-height:320px}}
+
+/* Local assessment recovery */
+.recovery-option{margin-top:20px}.recovery-option summary{cursor:pointer;font-weight:600}.recovery-option p{font-size:14px;color:#475467}.draft-save-status{font-size:13px;color:#475467;margin:0 0 12px}
+
+.recovery-option{margin-top:24px;font-size:14px}.recovery-option summary{cursor:pointer;font-weight:600}.recovery-option>p{max-width:70ch}.draft-save-status{font-size:13px;color:#475467}
+
+/* Maturity targets, analysis, and roadmap */
+.target-settings,.gap-panel,.improvement-roadmap{margin-top:24px}
+.target-settings>p,.gap-panel>p,.gap-list p{font-size:14px;color:#475467}
+.target-fields{border:0;padding:0;margin:0;min-width:0}
+.target-settings .success-message{color:#087443}
+.gap-list,.roadmap-actions{list-style:none;margin:16px 0 0;padding:0;display:grid;gap:14px}
+.gap-list li{padding:12px 0;border-top:1px solid #e4e5e6}
+.gap-row{display:flex;flex-wrap:wrap;justify-content:space-between;gap:6px 16px;align-items:baseline}
+.gap-row h3,.gap-row span{margin:0;font-size:14px}
+.gap-list p{margin:5px 0 0}
+.gap-meter{position:relative;height:8px;margin:8px 1px 0 0;border-radius:4px;background:#eceff2}
+.gap-meter i{position:absolute;inset:0 auto 0 0;background:#087443;border-radius:4px}
+.gap-meter .gap-shortfall{background:#f4b851;border-radius:0}
+.gap-meter .gap-target{top:-3px;bottom:-3px;width:2px;background:#344054;transform:translateX(-50%)}
+.gap-settings-link{display:inline-block;margin-top:12px;color:#075bb8;text-decoration:underline}
+.result-qualification{font-weight:600}.result-qualification.critical{color:#b42318}
+.draft-guidance{padding:12px 14px;background:#fff4dc;color:#714300;border-radius:10px;font-size:14px}
+.roadmap-action{border:1px solid #e4e5e6}
+.roadmap-action h3{font-size:16px;margin:8px 0 12px}
+.action-context{margin:0;color:#475467;font-size:13px}
+.roadmap-action dl{display:grid;gap:8px;margin:0}
+.roadmap-action dl>div{display:grid;grid-template-columns:minmax(120px,160px) 1fr;gap:12px;font-size:14px}
+.roadmap-action dt{font-weight:600}.roadmap-action dd{margin:0}
+.action-priority{display:inline-block;padding:1px 8px;border-radius:12px;background:#e6f4ec;color:#087443;font-weight:600;text-transform:capitalize}
+.action-priority.high{background:#fff0ef;color:#b42318}.action-priority.medium{background:#fff4dc;color:#714300}
+@media(max-width:620px){.roadmap-action dl>div{grid-template-columns:1fr;gap:2px}}
+@media print{.report-sheet .gap-panel{break-inside:auto}.gap-list li,.roadmap-action{break-inside:avoid}.gap-panel h2,.improvement-roadmap h2{break-after:avoid}.gap-meter,.action-priority{print-color-adjust:exact}}

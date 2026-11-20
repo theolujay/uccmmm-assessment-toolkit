@@ -1,13 +1,13 @@
 # UCCMM Assessment Toolkit
 
 > **User-Centred Change Management Maturity Model (UCCMM) Assessment Toolkit**  
-> A production-quality Progressive Web Application (PWA) designed for IT leaders and organisations implementing Enterprise Resource Planning (ERP) systems in Nigeria.
+> A Progressive Web Application (PWA) for IT leaders and organisations implementing Enterprise Resource Planning (ERP) systems in Nigeria.
 
 ---
 
 ## 📖 Overview
 
-The **UCCMM Assessment Toolkit** evaluates how prepared an organisation and its workforce are for ERP-driven organisational transformation. Grounded in the academic **User-Centred Change Management Maturity Model**, the platform enables IT leaders to diagnose cultural, structural, and procedural readiness across six core dimensions, identify critical gaps, and execute targeted interventions to secure adoption and project success.
+The **UCCMM Assessment Toolkit** implements the academic **User-Centred Change Management Maturity Model**. It helps IT leaders in Nigerian organisations assess how they manage the human side of an ERP rollout, identify their weakest areas, and decide what to improve first. It does not run or integrate with an ERP system.
 
 The platform provides dedicated workflows for two distinct user types:
 1. **Admin / IT Leader**: The organisation account owner who sets up the organisation profile, invites and tracks stakeholder participation, completes administrative assessments, analyzes maturity scores via multidimensional radar charts, reviews prioritised recommendations, and exports readiness reports.
@@ -20,11 +20,12 @@ The platform provides dedicated workflows for two distinct user types:
 - **Six-Dimension Assessment Engine**: Evaluates readiness across 6 dimensions with 5 core questions per dimension (30 core items) using a 5-point Likert-style weighted scale.
 - **Mathematical Scoring & 5-Level Maturity Model**: Dynamic dimension calculation ($D_j = \frac{\sum r_{ij}}{5n_j} \times 100$) and weighted overall maturity ($M = \sum w_j D_j$) mapped across 5 stages: *Initial*, *Developing*, *Defined*, *Managed*, and *Optimising*.
 - **Privacy & Anonymisation by Design**: Clear separation between participant tracking (invited, started, completed) and response data. Admins cannot view identifiable stakeholder answers.
-- **Offline-First PWA & Autosave**: Built with `vite-plugin-pwa` and IndexedDB (`idb`). Automatic background saving ensures assessment progress survives refreshes, tab closures, and unstable internet connectivity.
+- **PWA & Local Drafts**: The production app caches the interface and saves drafts in IndexedDB. Users can opt in on a private device to reopen a saved assessment after a restart while still offline. Sync and submission wait for online session verification. See [offline recovery](MATURITY-PLANNING.md#offline-behaviour).
 - **Role-Based Portals**:
   - **Admin Portal**: 2-stage organisation onboarding, assessment dashboard, stakeholder invitation & participation tracking, historical assessment timeline, maturity radar charts, and recommendation actions.
   - **Stakeholder Portal**: Simplified, distraction-free assessment environment with progress tracking, non-linear navigation, review stage, and personal readiness results.
-- **Actionable Recommendations & Reporting**: Tailored recommendations for scores between 10% and 80%, complete with downloadable organisation readiness reports.
+- **Targets & Gap Analysis**: Admins set optional per-dimension targets. Each new Admin baseline captures the targets in effect at submission, so historical gaps remain comparable.
+- **Recommendations & Reporting**: A rule-based roadmap prioritises target shortfalls and flags weak continuity practices. An Admin can print the selected baseline or save it as PDF from the browser. The guidance and gap priority thresholds are provisional.
 
 ---
 
@@ -51,11 +52,7 @@ uccmmm-assessment-toolkit/
 │       ├── src/
 │       │   └── index.ts             # Domain models, auth schemas, scoring types
 │       └── package.json
-├── docs/                            # Foundational specifications and master documentation
-│   ├── UCCMM Assessment Scoring Specification.md
-│   ├── UCCMM Assessment Scoring Specification.pdf
-│   ├── UCCMM Assessment Toolkit — Master Development Prompt.md
-│   └── UCCMM Assessment Toolkit.pdf
+├── MATURITY-PLANNING.md             # Scoring, targets, and validation notes
 ├── GUIDE.md                         # Developer & Architecture Guide
 ├── PLAN.md                          # Implementation Plan, Gap Analysis & Roadmap
 ├── PROMPT.md                        # Master Development Prompt & Technical Specification
@@ -79,13 +76,13 @@ uccmmm-assessment-toolkit/
 | **Offline Storage** | [IndexedDB](https://developer.mozilla.org/en-US/docs/Web/API/IndexedDB_API) via [`idb`](https://github.com/jakearchibald/idb) | Local client-side autosave for assessments |
 | **PWA Capabilities** | [`vite-plugin-pwa`](https://vite-pwa-org.netlify.app/) | Service worker, caching strategies, manifest |
 | **Testing** | [Vitest](https://vitest.dev/), [Testing Library](https://testing-library.com/) | Unit, contract, and UI component testing |
-| **E2E Testing** | [Playwright](https://playwright.dev/) | End-to-end user journey validation |
+| **Database regression tests** | PostgreSQL (`psql`) | Migration, scoring, and row-level access checks |
 
 ---
 
 ## 📊 Scoring Model Summary
 
-The scoring engine implements exact academic formulas defined in the [Scoring Specification](docs/UCCMM%20Assessment%20Scoring%20Specification.md):
+The scoring engine implements the academic formulas summarised in [Maturity planning](MATURITY-PLANNING.md):
 
 ### 1. Dimension Score ($D_j$)
 $$D_j = \frac{\sum_{i=1}^{n_j} r_{ij}}{5n_j} \times 100$$
@@ -95,7 +92,7 @@ $$D_j = \frac{\sum_{i=1}^{n_j} r_{ij}}{5n_j} \times 100$$
 
 ### 2. Overall Maturity Score ($M$)
 $$M = \sum_{j=1}^{6} w_j D_j$$
-- $w_j$: Configurable weight assigned to dimension $j$ ($\sum w_j = 1.0$).
+- $w_j = 1/6$ in `uccmm-v1`, so the overall score is the mean of the six dimension scores.
 
 ### 3. Five Maturity Levels
 1. **Initial**
@@ -111,8 +108,8 @@ All completed assessments are versioned and stored immutably to guarantee histor
 ## 💻 Getting Started
 
 ### Prerequisites
-- **Node.js**: v20.x or newer (Node.js 22+ recommended)
-- **pnpm**: v9.x or v10.x (`corepack enable pnpm`)
+- **Node.js**: v24 recommended
+- **pnpm**: use the version pinned in `package.json`.
 
 ### Installation & Setup
 
@@ -128,7 +125,7 @@ All completed assessments are versioned and stored immutably to guarantee histor
    ```
 
 3. **Configure environment variables**:
-   Create a `.env` file in the root directory (or use default mock mode):
+   Copy `apps/web/.env.example` to `apps/web/.env.local` to connect Supabase, or leave it unset for local demo mode:
    ```env
    VITE_SUPABASE_URL=your-supabase-url
    VITE_SUPABASE_ANON_KEY=your-supabase-anon-key
@@ -160,4 +157,4 @@ All completed assessments are versioned and stored immutably to guarantee histor
 - **[Master Implementation Plan (PLAN.md)](PLAN.md)**: Comprehensive repository assessment, gap analysis against newly-added docs, and milestone roadmap.
 - **[Master Development Prompt (PROMPT.md)](PROMPT.md)**: Authoritative technical specifications, Figma fidelity guidelines, and operational prompts.
 - **[Local Setup Guide (SETUP.md)](SETUP.md)**: Simple instructions for local development environments.
-- **[Scoring Specification (docs/)](docs/UCCMM%20Assessment%20Scoring%20Specification.md)**: Mathematical scoring formulas, dimension weights, and classification rules.
+- **[Maturity planning](MATURITY-PLANNING.md)**: Scoring, target and roadmap rules, and remaining validation work.

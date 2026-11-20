@@ -12,6 +12,7 @@ import {
 import { clearDraft, getAssessmentHistory as getStoredAssessmentHistory, getDraft, saveDraft, saveRecord } from '../lib/storage';
 import { isDemoMode, requireSupabase, supabase } from '../lib/supabase';
 import { getCurrentIdentity, type AuthIdentity } from './auth-service';
+import { getDemoMaturityTargets } from './maturity-target-service';
 
 type AssessmentIdentity = Pick<AuthIdentity, 'userId' | 'role' | 'organizationId' | 'email'>;
 
@@ -81,6 +82,7 @@ function recordFromRow(row: Record<string, unknown>): AssessmentRecord {
     submittedAt: normalizeTimestamp(row.submitted_at),
     responses: row.responses,
     evidence: row.evidence,
+    targetSnapshot: row.target_snapshot,
     templateSnapshot: row.template_snapshot as AssessmentRecord['templateSnapshot'],
     dimensionScores: row.dimension_scores as AssessmentRecord['dimensionScores'],
     overallScore: Number(row.overall_score),
@@ -88,15 +90,21 @@ function recordFromRow(row: Record<string, unknown>): AssessmentRecord {
   });
 }
 
-export async function loadActiveDraft(identity: AssessmentIdentity): Promise<AssessmentDraft> {
+export async function loadActiveDraft(identity: AssessmentIdentity, { localOnly = false }: { localOnly?: boolean } = {}): Promise<AssessmentDraft> {
   const context = getAssessmentContext(identity);
-  const localDraft = await getDraft(context.respondentKey, assessmentTemplate.version);
+  const localDraft = await getDraft(context.respondentKey, assessmentTemplate.version, context);
+  if (localOnly) {
+    if (!localDraft) throw new Error('There is no saved assessment draft on this device. Reconnect to start or load an assessment.');
+    return localDraft;
+  }
   if (supabase && typeof navigator !== 'undefined' && navigator.onLine) {
     const { data, error } = await supabase.from('assessment_drafts').select('*')
-      .eq('user_id', context.userId).eq('assessment_version', assessmentTemplate.version).maybeSingle();
+      .eq('user_id', context.userId).eq('organization_id', context.organisationId).eq('assessment_version', assessmentTemplate.version)
+      .abortSignal(AbortSignal.timeout(8_000)).maybeSingle();
     if (!error && data) {
       const remoteDraft = draftFromRow(data, context);
-      if (remoteDraft && (!localDraft || remoteDraft.updatedAt >= localDraft.updatedAt)) {
+      if (remoteDraft?.organisationId === context.organisationId && remoteDraft.respondentType === context.respondentType
+        && (!localDraft || remoteDraft.updatedAt >= localDraft.updatedAt)) {
         await saveDraft(remoteDraft);
         return remoteDraft;
       }
@@ -116,9 +124,12 @@ export async function saveActiveDraft(identity: AssessmentIdentity, input: {
   activeQuestionId: string;
 }): Promise<AssessmentDraft> {
   const context = getAssessmentContext(identity);
-  const existingDraft = await getDraft(context.respondentKey, assessmentTemplate.version) ?? createDraft(context);
+  const saved = await getDraft(context.respondentKey, assessmentTemplate.version, context);
+  if (saved && saved.activeQuestionId === input.activeQuestionId
+    && JSON.stringify(saved.responses) === JSON.stringify(input.responses)
+    && JSON.stringify(saved.evidence) === JSON.stringify(input.evidence)) return saved;
   const draft: AssessmentDraft = {
-    ...existingDraft,
+    ...(saved ?? createDraft(context)),
     responses: input.responses,
     evidence: input.evidence,
     activeQuestionId: input.activeQuestionId,
@@ -126,29 +137,36 @@ export async function saveActiveDraft(identity: AssessmentIdentity, input: {
     updatedAt: new Date().toISOString(),
   };
   await saveDraft(draft);
-
-  if (supabase && typeof navigator !== 'undefined' && navigator.onLine) {
-    const { error } = await supabase.from('assessment_drafts').upsert({
-      id: draft.id,
-      organization_id: context.organisationId,
-      user_id: context.userId,
-      respondent_type: context.respondentType,
-      assessment_version: draft.assessmentVersion,
-      responses: draft.responses,
-      evidence: draft.evidence,
-      active_question_id: draft.activeQuestionId,
-      status: draft.status,
-      created_at: draft.createdAt,
-      updated_at: draft.updatedAt,
-    }, { onConflict: 'user_id,assessment_version' });
-    if (error) throw new Error(`Your progress is saved on this device but could not sync: ${error.message}`);
-  }
   return draft;
 }
 
-export async function submitActiveAssessment(identity: AssessmentIdentity, responses: AssessmentResponses, evidence: AssessmentEvidence): Promise<AssessmentRecord> {
+/** Run separately from local saves and only after the assessment session has been verified. */
+export async function syncActiveDraft(identity: AssessmentIdentity, draft: AssessmentDraft): Promise<void> {
+  if (!supabase || typeof navigator === 'undefined' || !navigator.onLine || draft.status === 'draft') return;
   const context = getAssessmentContext(identity);
-  const draft = await getDraft(context.respondentKey, assessmentTemplate.version) ?? createDraft(context);
+  if (draft.respondentKey !== context.respondentKey || draft.organisationId !== context.organisationId || draft.respondentType !== context.respondentType) {
+    throw new Error('This draft belongs to a different assessment account.');
+  }
+  const { error } = await supabase.from('assessment_drafts').upsert({
+    id: draft.id,
+    organization_id: context.organisationId,
+    user_id: context.userId,
+    respondent_type: context.respondentType,
+    assessment_version: draft.assessmentVersion,
+    responses: draft.responses,
+    evidence: draft.evidence,
+    active_question_id: draft.activeQuestionId,
+    status: draft.status,
+    created_at: draft.createdAt,
+    updated_at: draft.updatedAt,
+  }, { onConflict: 'user_id,assessment_version' }).abortSignal(AbortSignal.timeout(8_000));
+  if (error) throw new Error(`Your progress is saved on this device but could not sync: ${error.message}`);
+}
+
+export async function submitActiveAssessment(identity: AssessmentIdentity, responses: AssessmentResponses, evidence: AssessmentEvidence): Promise<AssessmentRecord> {
+  if (supabase && typeof navigator !== 'undefined' && !navigator.onLine) throw new Error('Reconnect to submit your saved assessment.');
+  const context = getAssessmentContext(identity);
+  const draft = await getDraft(context.respondentKey, assessmentTemplate.version, context) ?? createDraft(context);
   const record = createAssessmentRecord({
     id: draft.id,
     organisationId: context.organisationId,
@@ -157,6 +175,7 @@ export async function submitActiveAssessment(identity: AssessmentIdentity, respo
     template: assessmentTemplate,
     responses,
     evidence,
+    targetSnapshot: isDemoMode ? getDemoMaturityTargets(identity) : undefined,
   });
 
   await saveRecord(record, context.respondentKey);
@@ -171,21 +190,24 @@ export async function submitActiveAssessment(identity: AssessmentIdentity, respo
       p_template_snapshot: record.templateSnapshot,
       p_evidence: record.evidence,
     });
-    if (error) {
-      const { data: existingRecord } = await client.from('assessment_records').select('id').eq('id', record.id).maybeSingle();
-      if (!existingRecord) throw new Error(`Your assessment is saved on this device but could not be submitted: ${error.message}`);
+    let submitted = data;
+    const needsRecovery = Boolean(error || !data);
+    if (needsRecovery) {
+      // A lost RPC response can leave a committed record. Return its original snapshot, not the local placeholder.
+      const { data: existingRecord } = await client.from('assessment_records').select('*').eq('id', record.id).maybeSingle();
+      if (!existingRecord) throw new Error(`Your assessment is saved on this device but could not be submitted: ${error?.message ?? 'No submitted record was returned.'}`);
+      submitted = existingRecord;
     }
-    if (data) {
-      const serverRecord = recordFromRow(data as Record<string, unknown>);
-      await saveRecord(serverRecord, context.respondentKey);
-      await clearDraft(context.respondentKey, assessmentTemplate.version);
-      return serverRecord;
+    const serverRecord = recordFromRow(submitted as Record<string, unknown>);
+    await saveRecord(serverRecord, context.respondentKey);
+    await clearDraft(context.respondentKey, assessmentTemplate.version, context);
+    if (needsRecovery) {
+      // A retry may have synced the draft again after the original RPC committed.
+      await client.from('assessment_drafts').delete().eq('id', record.id).eq('user_id', context.userId);
     }
+    return serverRecord;
   }
-  await clearDraft(context.respondentKey, assessmentTemplate.version);
-  if (supabase) {
-    await supabase.from('assessment_drafts').delete().eq('user_id', context.userId).eq('assessment_version', assessmentTemplate.version);
-  }
+  await clearDraft(context.respondentKey, assessmentTemplate.version, context);
   return record;
 }
 

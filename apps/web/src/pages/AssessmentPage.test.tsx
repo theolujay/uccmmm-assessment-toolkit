@@ -1,20 +1,31 @@
 // @vitest-environment jsdom
 import 'fake-indexeddb/auto';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { assessmentTemplate, evidenceMaxLength } from '@assessment/contracts';
 import { getDraft } from '../lib/storage';
+import { saveActiveDraft } from '../services/assessment-service';
 import { AssessmentPage } from './AssessmentPage';
 
 const user = vi.hoisted(() => ({
-  userId: 'stakeholder-page-test', organizationId: 'org-page-test', role: 'stakeholder', email: 'respondent@example.com',
+  userId: 'stakeholder-page-test', organizationId: 'org-page-test', role: 'stakeholder' as const, email: 'respondent@example.com',
 }));
-vi.mock('../auth/AuthProvider', () => ({ useAuth: () => ({ user }) }));
-vi.mock('../lib/supabase', () => ({ isDemoMode: false, supabase: null }));
+const environment = vi.hoisted(() => ({ connected: false, offlineRecovery: false, from: vi.fn(), rpc: vi.fn() }));
+vi.mock('../auth/AuthProvider', () => ({ useAuth: () => ({ user, offlineRecovery: environment.offlineRecovery }) }));
+vi.mock('../lib/supabase', () => ({
+  isDemoMode: false,
+  get supabase() { return environment.connected ? { from: environment.from, rpc: environment.rpc } : null; },
+}));
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  environment.connected = false;
+  environment.offlineRecovery = false;
+  vi.resetAllMocks();
+  vi.restoreAllMocks();
+});
 const showAssessment = () => render(<MemoryRouter><AssessmentPage /></MemoryRouter>);
 const savedDraft = () => getDraft(user.userId, assessmentTemplate.version);
 
@@ -54,5 +65,39 @@ describe('assessment evidence editor', () => {
     expect(restored.value).toBe(note);
     await interaction.clear(restored);
     await waitFor(async () => expect((await savedDraft())?.evidence).toEqual({}));
+  });
+
+  it('restores the draft on a cold start and waits for online verification before syncing or submitting', async () => {
+    environment.connected = true;
+    environment.offlineRecovery = true;
+    const connectivity = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+    const responses = Object.fromEntries(assessmentTemplate.dimensions.flatMap(({ questions }) => questions.map(({ id }) => [id, 2])));
+    const draft = await saveActiveDraft(user, { responses, evidence: { 'leadership-2': 'Stored before the restart.' }, activeQuestionId: 'leadership-2' });
+    const interaction = userEvent.setup();
+    const view = showAssessment();
+    const restoredQuestion = await screen.findByRole('button', { name: 'Question 2' });
+    expect(restoredQuestion.getAttribute('aria-current')).toBe('step');
+    expect(screen.getByRole<HTMLInputElement>('radio', { name: /rarely in place/i }).checked).toBe(true);
+    await interaction.click(screen.getByText('Evidence or comment'));
+    expect(screen.getByRole<HTMLTextAreaElement>('textbox').value).toBe('Stored before the restart.');
+    await interaction.click(screen.getByRole('radio', { name: /^not in place/i }));
+    await waitFor(async () => expect((await savedDraft())?.responses['leadership-2']).toBe(1));
+    await interaction.click(screen.getByRole('button', { name: 'Review answers' }));
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Submit assessment' }).disabled).toBe(true);
+
+    // Connectivity alone is not authorisation to transmit or submit the draft.
+    connectivity.mockReturnValue(true);
+    act(() => window.dispatchEvent(new Event('online')));
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Submit assessment' }).disabled).toBe(true);
+    expect(environment.from).not.toHaveBeenCalled();
+    expect(environment.rpc).not.toHaveBeenCalled();
+
+    const upsert = vi.fn().mockReturnValue({ abortSignal: vi.fn().mockResolvedValue({ error: null }) });
+    environment.from.mockReturnValue({ upsert });
+    environment.offlineRecovery = false;
+    view.rerender(<MemoryRouter><AssessmentPage /></MemoryRouter>);
+    await waitFor(() => expect(upsert).toHaveBeenCalledWith(expect.objectContaining({ id: draft.id, responses: { ...responses, 'leadership-2': 1 } }), expect.anything()));
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Submit assessment' }).disabled).toBe(false);
+    expect(environment.rpc).not.toHaveBeenCalled();
   });
 });

@@ -138,7 +138,7 @@ type DimensionDefinition = {
   prompts: readonly string[];
 };
 
-const dimensionDefinitions: readonly DimensionDefinition[] = [
+const dimensionDefinitions = [
   {
     id: 'leadership', name: 'Leadership, Governance & Strategy', shortName: 'Leadership',
     description: 'Examines executive sponsorship, budget allocation, and whether responsibility for change management is clearly assigned and aligned with organisational strategy.',
@@ -205,7 +205,7 @@ const dimensionDefinitions: readonly DimensionDefinition[] = [
       'Assessment results are used to plan further change management actions?',
     ],
   },
-];
+] as const satisfies readonly DimensionDefinition[];
 
 export const assessmentTemplate: AssessmentTemplate = {
   id: 'uccmm',
@@ -237,6 +237,15 @@ export const questionCount = assessmentTemplate.dimensions.reduce(
 
 export const assessmentResponseSchema = z.record(z.string(), z.number().int().min(1).max(5));
 export type AssessmentResponses = z.infer<typeof assessmentResponseSchema>;
+
+export const maturityTargetsSchema = z.preprocess((targets, context) => {
+  // Zod records skip this key before validation; reject it like any other unknown dimension.
+  if (typeof targets === 'object' && targets !== null && Object.hasOwn(targets, '__proto__')) {
+    context.addIssue({ code: 'custom', path: ['__proto__'], message: 'Unknown assessment dimension.' });
+  }
+  return targets;
+}, z.partialRecord(z.enum(dimensionDefinitions.map(({ id }) => id)), z.number().int().min(20).max(100)));
+export type MaturityTargets = z.infer<typeof maturityTargetsSchema>;
 
 export const evidenceMaxLength = 1000;
 const assessmentQuestionIds = new Set(assessmentTemplate.dimensions.flatMap((dimension) => dimension.questions.map((question) => question.id)));
@@ -272,6 +281,7 @@ export const assessmentRecordSchema = z.object({
   id: z.string().min(1), organisationId: z.string().min(1), respondentType: roleSchema,
   assessmentVersion: z.string().min(1), submittedAt: z.string().datetime(), responses: assessmentResponseSchema,
   evidence: assessmentEvidenceSchema.default({}),
+  targetSnapshot: maturityTargetsSchema.default({}).readonly(),
   templateSnapshot: assessmentTemplateSchema, dimensionScores: z.array(dimensionScoreSchema).length(6),
   overallScore: z.number().min(0).max(100), overallMaturityLevel: maturityLevelSchema,
 });
@@ -348,12 +358,16 @@ function freezeRecursively<T>(value: T): T {
 export function createAssessmentRecord(input: {
   id: string; organisationId: string; respondentType: Role; submittedAt: string;
   template: AssessmentTemplate; responses: AssessmentResponses; evidence?: AssessmentEvidence;
+  targetSnapshot?: MaturityTargets;
 }): AssessmentRecord {
   const scoreSummary = calculateAssessmentScores(input.template, input.responses);
   return freezeRecursively(assessmentRecordSchema.parse({
     id: input.id, organisationId: input.organisationId, respondentType: input.respondentType,
     assessmentVersion: input.template.version, submittedAt: input.submittedAt,
     responses: structuredClone(input.responses), evidence: structuredClone(input.evidence),
+    targetSnapshot: input.targetSnapshot,
     templateSnapshot: structuredClone(input.template), ...scoreSummary,
   }));
 }
+
+export * from './recommendations';

@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { organisationProfileSchema, type OrganisationProfile } from '@assessment/contracts';
 import { useAuth } from '../auth/AuthProvider';
+import { MaturityTargetsForm } from '../components/MaturityTargetsForm';
 import { getOrganisationProfile, updateOrganisationProfile } from '../services/organisation-service';
 
 export function AccountSettingsPage() {
@@ -52,5 +53,6 @@ export function AccountSettingsPage() {
       <a className="button secondary" href="/forgot-password">Reset password</a>
       {message && <p className="success-message" role="status">{message}</p>}
     </article>}
+    <MaturityTargetsForm />
   </section>;
 }

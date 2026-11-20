@@ -2,7 +2,7 @@
   "name": "uccmmm-assessment-toolkit",
   "private": true,
   "type": "module",
-  "packageManager": "pnpm@11.25.0",
+  "packageManager": "pnpm@12.21.0",
   "scripts": {
     "dev": "pnpm --parallel --filter @assessment/web dev",
     "build": "pnpm -r build",

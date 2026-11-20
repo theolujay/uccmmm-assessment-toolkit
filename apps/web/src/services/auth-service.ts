@@ -1,4 +1,5 @@
 import type { AdminRegistrationInput, Role } from '@assessment/contracts';
+import { isAuthRetryableFetchError } from '@supabase/supabase-js';
 import { isDemoMode, requireSupabase, supabase } from '../lib/supabase';
 
 const demoSessionKey = 'uccmm-demo-session';
@@ -10,6 +11,12 @@ export interface AuthIdentity {
   role: Role;
   organizationId: string;
   organizationName: string;
+}
+
+export class IdentityTransportError extends Error {
+  constructor(cause: unknown) {
+    super('The authentication service could not be reached.', { cause });
+  }
 }
 
 type DemoSession = AuthIdentity;
@@ -46,12 +53,15 @@ function writeDemoSession(session: DemoSession | null): void {
 export async function getCurrentIdentity(): Promise<AuthIdentity | null> {
   if (!supabase) return readDemoSession();
   const { data: { user }, error: userError } = await supabase.auth.getUser();
+  if (isAuthRetryableFetchError(userError)) throw new IdentityTransportError(userError);
   if (userError || !user) return null;
-  const { data, error } = await supabase
+  const { data, error, status } = await supabase
     .from('organization_members')
     .select('organization_id, role, organizations(name)')
     .eq('user_id', user.id)
     .maybeSingle();
+  // PostgREST uses status 0 when fetch fails without an HTTP response.
+  if (error && status === 0) throw new IdentityTransportError(error);
   if (error) throw error;
   if (!data) return null;
   const organization = data.organizations as unknown as { name: string } | null;

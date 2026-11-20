@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { assessmentTemplate, evidenceMaxLength, questionCount, type AssessmentEvidence, type AssessmentResponses } from '@assessment/contracts';
+import { assessmentTemplate, evidenceMaxLength, questionCount, type AssessmentDraft, type AssessmentEvidence, type AssessmentResponses } from '@assessment/contracts';
 import { useAuth } from '../auth/AuthProvider';
-import { loadActiveDraft, saveActiveDraft, submitActiveAssessment } from '../services/assessment-service';
+import { supabase } from '../lib/supabase';
+import { loadActiveDraft, saveActiveDraft, submitActiveAssessment, syncActiveDraft } from '../services/assessment-service';
 
 type AssessmentMode = 'intro' | 'questions' | 'review';
 
 export function AssessmentPage() {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, offlineRecovery, offlineRecoveryEnabled, enableOfflineRecovery, disableOfflineRecovery } = useAuth();
   const { userId, role, organizationId, email } = user ?? {};
   const identity = useMemo(() => userId && role && organizationId && email !== undefined
     ? { userId, role, organizationId, email }
@@ -20,47 +21,76 @@ export function AssessmentPage() {
   const [mode, setMode] = useState<AssessmentMode>('intro');
   const [responses, setResponses] = useState<AssessmentResponses>({});
   const [evidence, setEvidence] = useState<AssessmentEvidence>({});
-  const pendingSave = useRef(Promise.resolve());
+  const pendingSave = useRef(Promise.resolve(true));
+  const pendingSync = useRef(Promise.resolve());
+  const [localDraft, setLocalDraft] = useState<AssessmentDraft>();
+  const [saveStatus, setSaveStatus] = useState<'saving' | 'saved' | 'failed'>('saved');
+  const [syncError, setSyncError] = useState<string>();
+  const [restoreError, setRestoreError] = useState<string>();
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const [recoveryNotice, setRecoveryNotice] = useState<string>();
+  const [preparingRecovery, setPreparingRecovery] = useState(false);
   const [activeQuestionId, setActiveQuestionId] = useState(questions[0].question.id);
   const [isReady, setIsReady] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isOnline, setIsOnline] = useState(() => typeof navigator === 'undefined' || navigator.onLine);
   const [error, setError] = useState<string>();
+  const canSync = !offlineRecovery && isOnline;
+  const canSubmit = !supabase || canSync;
 
   useEffect(() => {
-    if (!identity) return;
+    if (!identity || isReady) return;
     let cancelled = false;
-    void loadActiveDraft(identity)
+    void loadActiveDraft(identity, { localOnly: offlineRecovery })
       .then((draft) => {
         if (cancelled) return;
         setResponses(draft.responses);
         setEvidence(draft.evidence);
         setActiveQuestionId(draft.activeQuestionId);
         setMode(draft.status === 'in_progress' ? 'questions' : 'intro');
+        setRestoreError(undefined);
+        setIsReady(true);
       })
-      .catch(() => {
-        if (!cancelled) setError('We could not restore your saved progress. You can still complete this assessment.');
-      })
-      .finally(() => {
-        if (!cancelled) setIsReady(true);
+      .catch((cause: unknown) => {
+        if (!cancelled) setRestoreError(cause instanceof Error ? cause.message : 'We could not restore your saved progress.');
       });
     return () => { cancelled = true; };
-  }, [identity]);
+  }, [identity, isReady, loadAttempt, offlineRecovery]);
 
   useEffect(() => {
-    if (!identity || !isReady || isSubmitting) return;
-    // Serialize saves so a slow request cannot overwrite a more recent edit.
+    if (!identity || !isReady) return;
+    setSaveStatus('saving');
     const save = pendingSave.current.then(async () => {
-      if (pendingSave.current !== save) return;
       try {
-        await saveActiveDraft(identity, { responses, evidence, activeQuestionId });
-        if (pendingSave.current === save) setError(undefined);
-      } catch (saveError) {
-        if (pendingSave.current === save) setError(saveError instanceof Error ? saveError.message : 'Your progress could not be saved. Please keep this tab open and try again.');
+        const draft = await saveActiveDraft(identity, { responses, evidence, activeQuestionId });
+        if (pendingSave.current === save) {
+          setLocalDraft(draft);
+          setSaveStatus('saved');
+        }
+        return true;
+      } catch {
+        if (pendingSave.current === save) setSaveStatus('failed');
+        return false;
       }
     });
     pendingSave.current = save;
-  }, [activeQuestionId, evidence, identity, isOnline, isReady, isSubmitting, responses]);
+  }, [activeQuestionId, evidence, identity, isReady, responses]);
+
+  useEffect(() => {
+    if (!supabase || !identity || !localDraft || !canSync || isSubmitting || saveStatus !== 'saved') return;
+    let cancelled = false;
+    // Local commits never wait on the network. Serialize cloud writes independently.
+    pendingSync.current = pendingSync.current.then(async () => {
+      if (cancelled) return;
+      try {
+        await syncActiveDraft(identity, localDraft);
+        if (!cancelled) setSyncError(undefined);
+      } catch (cause) {
+        if (!cancelled) setSyncError(cause instanceof Error ? cause.message : 'Your draft is saved on this device but could not sync.');
+      }
+    });
+    return () => { cancelled = true; };
+  }, [canSync, identity, isSubmitting, localDraft, saveStatus]);
 
   useEffect(() => {
     const onOffline = () => setIsOnline(false);
@@ -100,11 +130,12 @@ export function AssessmentPage() {
   };
 
   const submit = async () => {
-    if (!complete || !identity) return;
+    if (!complete || !identity || !canSubmit) return;
     setError(undefined);
     setIsSubmitting(true);
     try {
-      await pendingSave.current;
+      if (!await pendingSave.current) throw new Error('Your draft could not be saved on this device. Try editing a response and saving again.');
+      await pendingSync.current;
       await submitActiveAssessment(identity, responses, evidence);
       navigate('/results');
     } catch (submissionError) {
@@ -113,13 +144,42 @@ export function AssessmentPage() {
     }
   };
 
+  async function trustDevice() {
+    setPreparingRecovery(true);
+    setRecoveryNotice(undefined);
+    try {
+      const registration = await navigator.serviceWorker?.getRegistration();
+      if (!registration?.active) throw new Error('The offline app is not ready. Keep this page open online and try again.');
+      enableOfflineRecovery();
+      void navigator.storage?.persist?.().catch(() => undefined);
+    } catch (cause) {
+      setRecoveryNotice(cause instanceof Error ? cause.message : 'Could not enable recovery on this device.');
+    } finally {
+      setPreparingRecovery(false);
+    }
+  }
+
+  const recoveryOption = supabase && !offlineRecovery && isOnline && <details className="panel recovery-option" open={offlineRecoveryEnabled || undefined}>
+    <summary>Offline recovery on this device</summary>
+    <p>Use only on a private device. For seven days, anyone using this browser profile can reopen this local draft, including its notes, without signing in again. Sign out or turn off recovery before sharing this device.</p>
+    {offlineRecoveryEnabled ? <p><strong>Recovery enabled.</strong>{' '}<button type="button" className="button secondary" onClick={disableOfflineRecovery}>Turn off recovery</button></p> :
+      <button type="button" className="button secondary" disabled={preparingRecovery} onClick={() => void trustDevice()}>{preparingRecovery ? 'Preparing…' : 'Enable offline recovery'}</button>}
+    {recoveryNotice && <p className="page-error" role="alert">{recoveryNotice}</p>}
+  </details>;
+  const offlineNotice = (!isOnline || offlineRecovery) && <p className="offline-note" role="status">{offlineRecovery ? 'Local recovery: continue your saved assessment. Sync and submission require a verified online session.' : 'You’re offline. Your draft is saved on this device. Reconnect to sync and submit.'}</p>;
+  const saveNotice = saveStatus === 'failed'
+    ? <p className="page-error" role="alert">Could not save the latest edit on this device. Keep this page open and try editing again.</p>
+    : <p className="draft-save-status" role="status">{saveStatus === 'saving' ? 'Saving on this device…' : 'Saved on this device'}</p>;
+
   if (!isReady) {
-    return <section className="loading-state" aria-live="polite">Restoring your saved assessment…</section>;
+    return restoreError ? <section className="panel"><h1>Assessment draft unavailable</h1><p className="page-error" role="alert">{restoreError}</p><button className="button" onClick={() => { setRestoreError(undefined); setLoadAttempt((attempt) => attempt + 1); }}>Try loading again</button></section>
+      : <section className="loading-state" aria-live="polite">Restoring your saved assessment…</section>;
   }
 
   if (mode === 'intro') {
     return <section>
       <div className="page-heading"><div><p className="eyebrow">UCCMM maturity assessment</p><h1>Assess your change readiness</h1><p>Answer the questions based on your organisation’s current ERP change-management practices.</p></div></div>
+      {offlineNotice}
       <article className="panel assessment-intro-card"><h2>What to expect</h2><ul>
         <li>Six dimensions with five questions each.</li>
         <li>Choose one response from “Not in place” to “Fully and consistently in place.”</li>
@@ -128,6 +188,7 @@ export function AssessmentPage() {
         <li>Your progress saves automatically on this device and syncs to your account when connected.</li>
         <li>You can leave and resume later. All questions must be answered before submission.</li>
       </ul><button className="button" onClick={() => setMode('questions')}>{answeredCount > 0 ? 'Resume assessment' : 'Start assessment'}</button></article>
+      {recoveryOption}
     </section>;
   }
 
@@ -137,6 +198,9 @@ export function AssessmentPage() {
         <div><p className="eyebrow">Review assessment</p><h1>Check your answers</h1><p>Every core question must be answered before you submit.</p></div>
         <span className="progress-pill">{answeredCount}/{questionCount} answered</span>
       </div>
+      {offlineNotice}
+      {saveNotice}
+      {canSync && syncError && <p className="page-error" role="alert">{syncError}</p>}
       <div className="review-list">
         {assessmentTemplate.dimensions.map((dimension) => <article className="panel review-dimension" key={dimension.id}>
           <div><h2>{dimension.name}</h2><p>{dimension.description}</p></div>
@@ -152,8 +216,9 @@ export function AssessmentPage() {
       {error && <p className="form-error" role="alert">{error}</p>}
       <div className="review-actions">
         <button className="button secondary" disabled={isSubmitting} onClick={() => setMode('questions')}>Back to questions</button>
-        <button className="button" disabled={!complete || isSubmitting} onClick={() => void submit()}>{isSubmitting ? 'Submitting…' : 'Submit assessment'}</button>
+        <button className="button" disabled={!complete || isSubmitting || !canSubmit || saveStatus !== 'saved'} onClick={() => void submit()}>{isSubmitting ? 'Submitting…' : 'Submit assessment'}</button>
       </div>
+      {recoveryOption}
     </section>;
   }
 
@@ -162,7 +227,9 @@ export function AssessmentPage() {
         <div><p className="eyebrow">Maturity assessment</p><h1>{current.dimension.name}</h1><p>Question {activeIndex + 1} of {questionCount} · Answers are saved automatically.</p></div>
         <span className="progress-pill">{answeredCount}/{questionCount} answered</span>
       </div>
-      {!isOnline && <p className="offline-note" role="status">You’re offline. Answers are saved on this device and will sync when you reconnect.</p>}
+    {offlineNotice}
+    {saveNotice}
+    {canSync && syncError && <p className="page-error" role="alert">{syncError}</p>}
     <div className="assessment-layout">
       <aside className="dimension-nav" aria-label="Assessment dimensions">
         <h2>Dimensions</h2>
@@ -215,5 +282,6 @@ export function AssessmentPage() {
         <button className="button secondary review-button" onClick={() => setMode('review')}>Review answers</button>
       </aside>
     </div>
+    {recoveryOption}
   </section>;
 }
