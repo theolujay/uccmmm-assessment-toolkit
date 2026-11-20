@@ -36,6 +36,7 @@ it('carries the selected baseline through the gap chart, roadmap and printable r
   const user = userEvent.setup();
   show('/results');
   await user.selectOptions(await screen.findByRole('combobox', { name: 'Past assessments' }), 'historical');
+  expect(screen.getByText('73.33%')).toBeTruthy();
   const gap = screen.getByRole('region', { name: 'Target gap analysis' });
   const rows = within(gap).getAllByRole('listitem');
   expect(within(rows[0]).getByText('40 pp short · high priority')).toBeTruthy();
@@ -50,6 +51,7 @@ it('carries the selected baseline through the gap chart, roadmap and printable r
   await user.click(screen.getByRole('link', { name: 'Open assessment report' }));
   await user.click(await screen.findByRole('button', { name: 'Print / save PDF' }));
   expect(print).toHaveBeenCalledOnce();
+  expect(screen.getByText('73.33%')).toBeTruthy();
   expect(screen.getByText('Private baseline note.')).toBeTruthy();
   expect(screen.getByText(/40 percentage points below the 80% target/)).toBeTruthy();
   await user.selectOptions(screen.getByRole('combobox', { name: 'Assessment date' }), 'latest');

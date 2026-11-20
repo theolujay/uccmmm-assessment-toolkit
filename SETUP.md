@@ -73,30 +73,38 @@ VITE_SUPABASE_URL=https://your-project.supabase.co
 VITE_SUPABASE_ANON_KEY=your-public-anon-key
 ```
 
-Apply all database migrations, including `20261119000200_maturity_targets.sql`, before deploying the updated web app. Deploy the invitation functions if they have not already been deployed:
+Create a dedicated hosted staging project in the [Supabase dashboard](https://supabase.com/dashboard). Get its Project URL and publishable key (or legacy `anon` key) from **Connect** or **Settings → API Keys**. `VITE_SUPABASE_ANON_KEY` can hold either public key. Never put a secret key, service-role key, database password, or Resend key in a `VITE_` variable.
+
+From the repository root, link the hosted project and apply all three migrations. If you have the CLI installed, you can use `supabase` in place of `npx supabase`. You don't need Docker or `supabase start` to use a hosted project.
 
 ```bash
-supabase link --project-ref your-project-ref
-supabase db push
-supabase functions deploy invite-stakeholder
-supabase functions deploy manage-stakeholder
+npx supabase login
+npx supabase link --project-ref YOUR_PROJECT_REF
+npx supabase db push --dry-run
+npx supabase db push
 ```
 
-In Supabase Auth settings, set the production Site URL and allow the app’s `/reset-password` redirect. Enable email confirmation for Admin accounts.
+In **Authentication → URL Configuration**, set the Site URL to `http://localhost:5173` for initial local testing, then switch to your stable HTTPS app URL when deployed. Add the exact `/reset-password` URL for each origin you use. Keep email/password sign-up and email confirmation enabled. Register the first Admin using **Set up your organisation** in the app, not by manually adding a user in Supabase. For a first test, use a Supabase project team email or configure [custom SMTP for Supabase Auth](https://supabase.com/docs/guides/auth/auth-smtp) for confirmations and password resets to other addresses. When using Vercel, also set the two `VITE_SUPABASE_` values there and redeploy.
 
-Set these Edge Function secrets in Supabase. The service-role key and Resend API key must never be added to a `VITE_` variable or shipped to the browser:
+### Enable stakeholder invitations
+
+Set these **custom** secrets in **Edge Functions → Secrets** in the Supabase dashboard:
 
 ```text
-SUPABASE_URL
-SUPABASE_ANON_KEY
-SUPABASE_SERVICE_ROLE_KEY
 RESEND_API_KEY
 INVITATION_FROM_EMAIL
 APP_BASE_URL
 APP_ORIGIN
 ```
 
-`INVITATION_FROM_EMAIL` must use a sender domain verified in Resend. `APP_BASE_URL` is the public app URL; `APP_ORIGIN` is its origin, such as `https://assessment.example.com`.
+Use a sender domain verified in Resend. Set `APP_BASE_URL` to the app URL and `APP_ORIGIN` to its exact browser origin (for example, `https://assessment.example.com`, with no trailing slash). The hosted Edge runtime supplies `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY`; do not enter them as custom secrets. The invitation function sends email via Resend separately from Supabase Auth’s confirmation/reset email settings.
+
+```bash
+npx supabase functions deploy invite-stakeholder
+npx supabase functions deploy manage-stakeholder
+```
+
+Verify that an Admin can sign in and submit a test assessment, then invite a stakeholder and sign in separately to check participation and privacy.
 
 ## 7. Test recovery after an offline restart
 

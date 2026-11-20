@@ -156,5 +156,6 @@ All completed assessments are versioned and stored immutably to guarantee histor
 - **[Developer & Architecture Guide (GUIDE.md)](GUIDE.md)**: Deep dive into architectural patterns, data flow, scoring engine, privacy design, and offline PWA handling.
 - **[Master Implementation Plan (PLAN.md)](PLAN.md)**: Comprehensive repository assessment, gap analysis against newly-added docs, and milestone roadmap.
 - **[Master Development Prompt (PROMPT.md)](PROMPT.md)**: Authoritative technical specifications, Figma fidelity guidelines, and operational prompts.
-- **[Local Setup Guide (SETUP.md)](SETUP.md)**: Simple instructions for local development environments.
+- **[Local Setup Guide (SETUP.md)](SETUP.md)**: Local development and Supabase setup.
+- **[Presentation briefing (PRESENTATION.md)](PRESENTATION.md)**: Vercel deployment, repeatable staging demo, and report/slide updates.
 - **[Maturity planning](MATURITY-PLANNING.md)**: Scoring, target and roadmap rules, and remaining validation work.

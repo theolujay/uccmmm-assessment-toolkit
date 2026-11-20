@@ -4,7 +4,7 @@ The migrations create organisation membership, stakeholder participation, draft 
 
 1. Create a Supabase project and set the web app variables in `apps/web/.env.local` using `apps/web/.env.example`.
 2. Run `supabase link --project-ref <project-ref>` and `supabase db push`.
-3. Set the Edge Function secrets listed in `SETUP.md`.
+3. Set the four custom Edge Function secrets listed in [SETUP.md](../SETUP.md#enable-stakeholder-invitations). Supabase injects the reserved `SUPABASE_*` variables in the hosted runtime.
 4. Verify the sender domain in Resend and set the invitation `from` address.
 5. Deploy `invite-stakeholder` and `manage-stakeholder` with `supabase functions deploy`.
 6. Configure the Supabase Auth Site URL and `/reset-password` redirect allowlist, then enable Admin email confirmation.

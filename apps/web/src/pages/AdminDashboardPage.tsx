@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import type { AssessmentRecord, ParticipationSummary } from '@assessment/contracts';
 import { RadarChart } from '../components/RadarChart';
 import { StatCard } from '../components/StatCard';
+import { formatScore } from '../lib/format-score';
 import { getLatestAssessment } from '../services/assessment-service';
 import { getParticipationSummary } from '../services/stakeholder-service';
 
@@ -33,11 +34,11 @@ export function AdminDashboardPage() {
     </div>
     {!record ? <article className="panel empty-state admin-empty-state"><span aria-hidden="true">📊</span><h2>No admin assessment data yet</h2><p>Complete your own baseline assessment. Stakeholder answers and scores remain private from this dashboard.</p><button className="button" onClick={() => navigate('/assessment')}>Start assessment</button></article> : <>
       <div className="results-grid results-overview">
-        <article className="panel score-panel"><h2>Your organisation baseline</h2><div className="score-ring"><strong>{Math.round(record.overallScore)}%</strong></div><b>{record.overallMaturityLevel}</b><p>Based on your private Admin assessment.</p></article>
+        <article className="panel score-panel"><h2>Your organisation baseline</h2><div className="score-ring"><strong>{formatScore(record.overallScore)}</strong></div><b>{record.overallMaturityLevel}</b><p>Based on your private Admin assessment.</p></article>
         <article className="panel radar-panel"><h2>Maturity by dimension</h2><RadarChart scores={record.dimensionScores} /></article>
       </div>
       <article className="panel dimension-panel result-dimension-panel"><h2>Dimension scores</h2>{record.dimensionScores.map((dimension) => <div className="score-row" key={dimension.dimensionId}>
-        <div><span>{dimension.dimensionName}</span><b>{Math.round(dimension.scorePercentage)}%</b></div><div className="bar"><i style={{ width: `${dimension.scorePercentage}%` }} /></div><small>{dimension.maturityLevel}</small>
+        <div><span>{dimension.dimensionName}</span><b>{formatScore(dimension.scorePercentage)}</b></div><div className="bar"><i style={{ width: `${dimension.scorePercentage}%` }} /></div><small>{dimension.maturityLevel}</small>
       </div>)}</article>
     </>}
     <p className="privacy-note">Stakeholder participation is shown separately from private answers and individual results.</p>

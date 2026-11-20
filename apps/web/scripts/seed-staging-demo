@@ -1,0 +1,251 @@
+#!/usr/bin/env node
+import { Buffer } from 'node:buffer';
+import { createHash } from 'node:crypto';
+import { registerHooks } from 'node:module';
+import process from 'node:process';
+import { pathToFileURL } from 'node:url';
+import { isDeepStrictEqual } from 'node:util';
+import { createClient } from '@supabase/supabase-js';
+
+// Node strips the contracts' TypeScript, but needs the extension on this one export.
+// Do not change how any other workspace imports resolve.
+const contractsUrl = import.meta.resolve('@assessment/contracts');
+const hooks = registerHooks({
+  resolve(specifier, context, nextResolve) {
+    return nextResolve(context.parentURL === contractsUrl && specifier === './recommendations'
+      ? './recommendations.ts' : specifier, context);
+  },
+});
+const { assessmentTemplate, calculateAssessmentScores, maturityTargetsSchema } = await (async () => {
+  try {
+    return await import(contractsUrl);
+  } finally {
+    hooks.deregister();
+  }
+})();
+
+export const orgName = 'Fictional Staging Demo - Paper Moon ERP';
+const target = 80;
+const version = 'uccmm-v1';
+// Report §4.2.2; same criterion ratings as scoring-acceptance.test.ts.
+const items = {
+  leadership: [4, 4, 4, 4, 3],
+  communication: [3, 3, 3, 3, 4],
+  requirements: [3, 3, 3, 3, 3],
+  readiness: [3, 3, 3, 2, 2],
+  training: [4, 3, 4, 3, 3],
+  resilience: [3, 3, 2, 2, 2],
+};
+const evidence = { 'resilience-4': 'Fictional demo: the team has not tested backup power or connectivity during a cutover.' };
+
+class SeedError extends Error {}
+
+function buildFixture() {
+  const questions = assessmentTemplate.dimensions.flatMap(({ id, questions }) =>
+    questions.map((question) => [question.id, items[id]?.[question.order - 1]]));
+  const responses = Object.fromEntries(questions);
+  const scores = calculateAssessmentScores(assessmentTemplate, responses);
+  const resilience = scores.dimensionScores.find(({ dimensionId }) => dimensionId === 'resilience');
+  if (assessmentTemplate.version !== version || questions.length !== 30 || questions[6][0] !== 'communication-2'
+    || scores.overallScore.toFixed(2) !== '61.33' || scores.overallMaturityLevel !== 'Managed'
+    || resilience?.scorePercentage !== 48) {
+    throw new SeedError('The current template no longer matches the worked-example fixture. No writes attempted.');
+  }
+  return {
+    responses, scores,
+    draft: {
+      responses: Object.fromEntries(questions.slice(0, 6)),
+      evidence: { 'communication-1': 'Fictional demo: stakeholder list reviewed at the kickoff.' },
+      active_question_id: questions[6][0],
+      status: 'in_progress',
+    },
+  };
+}
+
+function fixtureId(kind, organizationId, userId) {
+  const bytes = createHash('sha256').update(`uc-cmmm/staging-demo/${version}/${kind}/${organizationId}/${userId}`).digest().subarray(0, 16);
+  bytes[6] = (bytes[6] & 0x0f) | 0x80; // Custom deterministic UUID (v8).
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = bytes.toString('hex');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+function jwtRole(token) {
+  if (typeof token !== 'string' || !/^[\w-]+\.[\w-]+\.[\w-]+$/.test(token)) return undefined;
+  try {
+    return JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString())?.role;
+  } catch {
+    return undefined;
+  }
+}
+
+function writeConfig(confirmedUrl, env) {
+  const { UCCMMM_DEMO_URL: url, UCCMMM_DEMO_PUBLIC_KEY: key, UCCMMM_DEMO_EMAIL: email, UCCMMM_DEMO_PASSWORD: password } = env;
+  if (!/^https:\/\/[a-z0-9]{20}\.supabase\.co$/.test(url ?? '') || confirmedUrl !== url) {
+    throw new SeedError('Pass --write followed by the exact hosted staging URL in UCCMMM_DEMO_URL (HTTPS, no trailing slash).');
+  }
+  if (!key || (!/^sb_publishable_[\w-]+$/.test(key) && jwtRole(key) !== 'anon')) {
+    throw new SeedError('UCCMMM_DEMO_PUBLIC_KEY must be a publishable or legacy anon key, never a secret or service-role key.');
+  }
+  if (!email || !password) throw new SeedError('Set UCCMMM_DEMO_EMAIL and UCCMMM_DEMO_PASSWORD for the existing staging Admin.');
+  return { url, key, email, password };
+}
+
+async function query(request, action) {
+  const { data, error, status } = await request;
+  // Do not echo arbitrary API errors (which can contain details from requests).
+  if (error) throw new SeedError(`${action} failed (HTTP ${status || 'unavailable'}). Check staging configuration and rerun; no rollback is attempted.`);
+  return data;
+}
+
+function verifyBaseline(row, identity, fixture) {
+  const expected = fixture.scores;
+  const dimensions = row?.dimension_scores;
+  if (row?.id !== identity.id || row.organization_id !== identity.organization_id
+    || row.respondent_type !== 'admin' || row.assessment_version !== version
+    || !isDeepStrictEqual(row.responses, fixture.responses) || !isDeepStrictEqual(row.evidence, evidence)
+    || !isDeepStrictEqual(row.template_snapshot, assessmentTemplate)
+    || row.target_snapshot?.resilience !== target
+    || row.overall_maturity_level !== expected.overallMaturityLevel
+    || !(Math.abs(Number(row.overall_score) - expected.overallScore) < 0.00001)
+    || !Array.isArray(dimensions) || dimensions.length !== expected.dimensionScores.length
+    || !expected.dimensionScores.every(({ scorePercentage, ...fields }, i) => {
+      const { scorePercentage: actual, ...rest } = dimensions[i] ?? {};
+      return isDeepStrictEqual(rest, fields) && Math.abs(actual - scorePercentage) < 0.00001;
+    })) {
+    throw new SeedError('The deterministic baseline does not match the worked example (including its original 80% resilience target). It will not be replaced.');
+  }
+}
+
+async function seed({ url, key, email, password }, fixture, log, fetchImpl) {
+  const client = createClient(url, key, {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+    global: { fetch: (input, init) => fetchImpl(input, { ...init, redirect: 'error', signal: AbortSignal.timeout(10_000) }) },
+  });
+  const { data: auth, error } = await client.auth.signInWithPassword({ email, password });
+  if (error || !auth.user?.id || jwtRole(auth.session?.access_token) !== 'authenticated') {
+    throw new SeedError('Could not sign in as an authenticated staging user. Register and confirm the Admin account in the UI first.');
+  }
+  const userId = auth.user.id;
+  const member = await query(client.from('organization_members').select('organization_id,role')
+    .eq('user_id', userId).maybeSingle(), 'Read membership');
+  if (member?.role !== 'admin') throw new SeedError('The signed-in account is not an organisation Admin.');
+  const organizationId = member.organization_id;
+
+  async function readTargets() {
+    const org = await query(client.from('organizations').select('name,maturity_targets')
+      .eq('id', organizationId).maybeSingle(), 'Read organisation');
+    if (org?.name !== orgName) throw new SeedError(`The staging organisation name must be exactly: ${orgName}`);
+    const targets = maturityTargetsSchema.safeParse(org.maturity_targets);
+    if (!targets.success) throw new SeedError('Unexpected organisation maturity targets; refusing to write.');
+    if (targets.data.resilience !== undefined && targets.data.resilience !== target) {
+      throw new SeedError('An organisation resilience target other than 80% already exists; refusing to write.');
+    }
+    return targets.data;
+  }
+
+  const targets = await readTargets();
+  const baselineId = fixtureId('baseline', organizationId, userId);
+  const draftId = fixtureId('offline-draft', organizationId, userId);
+  const readDraft = () => query(client.from('assessment_drafts').select('id,organization_id,respondent_type')
+    .eq('user_id', userId).eq('assessment_version', version).maybeSingle(), 'Read active draft');
+  // Record RLS only exposes submissions linked to this respondent. Verify the payload as well as the id.
+  const baseline = await query(client.from('assessment_records').select('*').eq('id', baselineId).maybeSingle(), 'Read baseline');
+  const identity = { id: baselineId, organization_id: organizationId, respondent_type: 'admin', assessment_version: version };
+  if (baseline) verifyBaseline(baseline, identity, fixture);
+  const draft = await readDraft();
+  if (draft && (draft.organization_id !== organizationId || draft.respondent_type !== 'admin')) {
+    throw new SeedError('The active draft has unexpected ownership; refusing to write.');
+  }
+  // The existing submission RPC inserts a respondent link whose trigger deletes the
+  // entire user/version draft slot, even when the draft and submission IDs differ.
+  if (!baseline && draft) throw new SeedError('The baseline is missing but an active draft exists. Use a fresh staging Admin; submitting would delete the draft.');
+  const completedDraft = draft ? null : await query(client.from('assessment_records').select('id')
+    .eq('id', draftId).maybeSingle(), 'Check whether the demo draft was already submitted');
+
+  if (!baseline) {
+    if (targets.resilience === undefined) {
+      const updated = await query(client.from('organizations').update({ maturity_targets: { ...targets, resilience: target } })
+        .eq('id', organizationId).eq('name', orgName).filter('maturity_targets', 'eq', JSON.stringify(targets))
+        .select('id').maybeSingle(), 'Set the unused resilience target');
+      if (!updated) throw new SeedError('The organisation or targets changed after preflight; nothing was overwritten. Review and rerun.');
+    }
+    if ((await readTargets()).resilience !== target || await readDraft()) {
+      throw new SeedError('Targets or draft changed during seeding; baseline was not submitted. Review before rerunning.');
+    }
+    const submitted = await query(client.rpc('submit_assessment_record', {
+      p_assessment_id: baselineId,
+      p_organization_id: organizationId,
+      p_respondent_type: 'admin',
+      p_assessment_version: version,
+      p_responses: fixture.responses,
+      p_template_snapshot: assessmentTemplate,
+      p_evidence: evidence,
+    }), 'Submit baseline');
+    verifyBaseline(submitted, identity, fixture);
+  } else if (targets.resilience === undefined) {
+    log('Live resilience target is unset; leaving it unset. The baseline still has its original 80% snapshot.');
+  }
+  log(`Baseline ${baseline ? 'reused' : 'submitted'}: /reports?assessment=${baselineId}`);
+
+  if (draft) {
+    log('Existing active draft preserved as-is.');
+  } else if (completedDraft) {
+    log('The demo draft was already submitted; no replacement draft created.');
+  } else {
+    await query(client.from('assessment_drafts').insert({
+      ...identity, id: draftId, user_id: userId, ...fixture.draft,
+    }).select('id').single(), 'Insert partial draft without overwriting the draft slot');
+    log('Partial draft created: 6/30 answered, resumes at communication-2.');
+  }
+}
+
+const help = `UC-CMMM staging demo (Node 24)
+  node scripts/seed-staging-demo [--dry-run]
+  node --env-file=.env.demo.local scripts/seed-staging-demo --write https://<staging-ref>.supabase.co
+
+Dry-run is the default: no credentials, network, or writes. For --write, set
+UCCMMM_DEMO_URL, UCCMMM_DEMO_PUBLIC_KEY, UCCMMM_DEMO_EMAIL, UCCMMM_DEMO_PASSWORD
+in the ignored .env.demo.local file. Confirm that the URL is your staging project
+with the evidence and maturity-target migrations applied. Register/confirm an
+Admin in the UI under this exact fictional organisation name:
+  ${orgName}
+
+Keep the demo account signed out of the app on all devices while seeding; the
+submission RPC deletes the active draft and cannot atomically check that the
+slot is empty or that targets are unchanged. Do not edit this org concurrently.
+Writes are separate requests: if interrupted, rerun rather than deleting data.
+A rerun reuses the baseline and never overwrites an existing draft or target.
+If the draft slot is empty, it inserts the partial draft unless that draft was
+already submitted. A missing baseline with any active draft blocks all writes.
+
+For the offline segment, sign in and open the Assessment page online in a fresh
+browser profile first to cache the synced draft. For offline reopening, wait for
+the service worker and enable offline recovery on the private demo device.
+Invite the demo stakeholder manually from the UI.`;
+
+export async function runDemo(args, env, { log = console.log, fetchImpl = globalThis.fetch } = {}) {
+  if (args.length === 1 && args[0] === '--help') return log(help);
+  const write = args.length === 2 && args[0] === '--write';
+  if (!write && !(args.length === 0 || (args.length === 1 && args[0] === '--dry-run'))) {
+    throw new SeedError('Expected no arguments, --dry-run, --help, or --write <exact staging URL>.');
+  }
+  const fixture = buildFixture();
+  const summary = `${fixture.scores.overallScore.toFixed(2)}% ${fixture.scores.overallMaturityLevel}; resilience 48% vs ${target}% (32-point gap).`;
+  if (!write) {
+    log(`Dry run (offline, no writes) for ${orgName}: ${summary}`);
+    log('Planned partial draft: 6/30 answered, resumes at communication-2.');
+    return;
+  }
+  await seed(writeConfig(args[1], env), fixture, log, fetchImpl);
+  log(summary);
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  try {
+    await runDemo(process.argv.slice(2), process.env);
+  } catch (error) {
+    console.error(error instanceof SeedError ? error.message : 'Demo seeding failed unexpectedly. Review staging state before rerunning.');
+    process.exitCode = 1;
+  }
+}
