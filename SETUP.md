@@ -79,25 +79,29 @@ From the repository root, link the hosted project and apply all three migrations
 
 ```bash
 npx supabase login
-npx supabase link --project-ref YOUR_PROJECT_REF
-npx supabase db push --dry-run
-npx supabase db push
+npx supabase link YOUR_PROJECT_REF
+npx supabase db push --remote --dry-run
+npx supabase db push --remote
 ```
+
+`link` records the hosted project; it does not change the default database target in the current CLI. Pass `--remote` to `db push`, not to `link`. If the project is `COMING_UP`, wait until it is **Active Healthy** in the dashboard. Check that the dry run names your hosted project before running the final push.
 
 In **Authentication → URL Configuration**, set the Site URL to `http://localhost:5173` for initial local testing, then switch to your stable HTTPS app URL when deployed. Add the exact `/reset-password` URL for each origin you use. Keep email/password sign-up and email confirmation enabled. Register the first Admin using **Set up your organisation** in the app, not by manually adding a user in Supabase. For a first test, use a Supabase project team email or configure [custom SMTP for Supabase Auth](https://supabase.com/docs/guides/auth/auth-smtp) for confirmations and password resets to other addresses. When using Vercel, also set the two `VITE_SUPABASE_` values there and redeploy.
 
 ### Enable stakeholder invitations
 
-Set these **custom** secrets in **Edge Functions → Secrets** in the Supabase dashboard:
+1. In [Resend → Domains](https://resend.com/domains), add a domain or subdomain whose DNS you control, such as `notify.example.com`. Add the DNS records Resend provides and wait until it shows **Verified**. Your website can stay on `vercel.app`; this is the **email sender domain**.
+2. In [Resend → API Keys](https://resend.com/api-keys), create a **Sending access** key restricted to that domain. Copy the key directly into Supabase, not into chat, source control, or Vercel.
+3. In **Supabase → Edge Functions → Secrets**, set these four values:
 
-```text
-RESEND_API_KEY
-INVITATION_FROM_EMAIL
-APP_BASE_URL
-APP_ORIGIN
-```
+| Secret | Value |
+| --- | --- |
+| `RESEND_API_KEY` | Your Resend sending key |
+| `INVITATION_FROM_EMAIL` | `UCCMM Toolkit <assessments@notify.example.com>` (use your verified domain) |
+| `APP_BASE_URL` | Your deployed app URL, e.g. `https://uccmmm-assessment-toolkit.vercel.app` |
+| `APP_ORIGIN` | The exact browser origin, e.g. `https://uccmmm-assessment-toolkit.vercel.app` (no trailing slash) |
 
-Use a sender domain verified in Resend. Set `APP_BASE_URL` to the app URL and `APP_ORIGIN` to its exact browser origin (for example, `https://assessment.example.com`, with no trailing slash). The hosted Edge runtime supplies `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY`; do not enter them as custom secrets. The invitation function sends email via Resend separately from Supabase Auth’s confirmation/reset email settings.
+The hosted Edge runtime supplies `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY`; do not enter them as custom secrets. This configures **stakeholder invitations**. Admin signup confirmations and password resets are separate and use Supabase Auth’s email settings.
 
 ```bash
 npx supabase functions deploy invite-stakeholder

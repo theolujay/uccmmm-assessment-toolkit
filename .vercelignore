@@ -1,0 +1,11 @@
+**/.env
+**/.env.*
+**/node_modules/
+**/dist/
+**/.next/
+**/*.tsbuildinfo
+supabase/.temp/
+Assessment Toolkit/
+docs/
+**/*.pdf
+**/*.patch

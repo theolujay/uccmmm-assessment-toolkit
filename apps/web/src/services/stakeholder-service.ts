@@ -39,7 +39,11 @@ export async function listStakeholders(): Promise<Stakeholder[]> {
   const client = requireSupabase();
   const identity = await getCurrentIdentity();
   if (!identity || identity.role !== 'admin') throw new Error('Admin access is required to view stakeholders.');
-  const { data, error } = await client.from('stakeholders').select('id,organization_id,full_name,email,department,job_role,invitation_status,assessment_status,invited_at,started_at,completed_at').eq('organization_id', identity.organizationId).order('created_at');
+  const { data, error } = await client.from('stakeholders')
+    .select('id,organization_id,full_name,email,department,job_role,invitation_status,assessment_status,invited_at,started_at,completed_at')
+    .eq('organization_id', identity.organizationId)
+    // PostgREST requires SELECT privilege on the sort column as well as the returned columns.
+    .order('invited_at').order('id');
   if (error) throw error;
   return (data ?? []).map((row) => fromDatabaseRow(row));
 }
