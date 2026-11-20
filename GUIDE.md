@@ -1,7 +1,6 @@
 # UCCMM Assessment Toolkit — Developer & Architecture Guide
 
-> **Version**: 2.0.0  
-> **Authoritative Guide**: Architecture, Domain Models, Scoring Engine, Privacy, and Implementation Patterns for the User-Centred Change Management Maturity Model (UCCMM) Assessment Toolkit.
+> **Historical design reference.** This guide describes an earlier design and is not the current implementation or deployment guide. Start with the [README](README.md), [setup guide](SETUP.md), and [maturity planning notes](MATURITY-PLANNING.md).
 
 ---
 

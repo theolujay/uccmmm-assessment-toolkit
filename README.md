@@ -1,161 +1,56 @@
-# UCCMM Assessment Toolkit
+# UC-CMMM Assessment Toolkit
 
-> **User-Centred Change Management Maturity Model (UCCMM) Assessment Toolkit**  
-> A Progressive Web Application (PWA) for IT leaders and organisations implementing Enterprise Resource Planning (ERP) systems in Nigeria.
+**A decision-support tool for managing the people side of an ERP rollout.** The User-Centred Change Management Maturity Model (UC-CMMM) helps IT leaders in Nigerian organisations assess current practices, identify gaps, and decide what to improve first. It does not run or integrate with an ERP system.
 
----
+[Open the live toolkit](https://uccmmm-assessment-toolkit.vercel.app) · [Set up locally](SETUP.md) · [Rehearse the presentation](PRESENTATION.md)
 
-## 📖 Overview
+![Illustrated fictional baseline: 61.33% Managed, with resilience at 48% against an 80% target.](apps/web/public/assets/assessment-preview.svg)
 
-The **UCCMM Assessment Toolkit** implements the academic **User-Centred Change Management Maturity Model**. It helps IT leaders in Nigerian organisations assess how they manage the human side of an ERP rollout, identify their weakest areas, and decide what to improve first. It does not run or integrate with an ERP system.
+## What it does
 
-The platform provides dedicated workflows for two distinct user types:
-1. **Admin / IT Leader**: The organisation account owner who sets up the organisation profile, invites and tracks stakeholder participation, completes administrative assessments, analyzes maturity scores via multidimensional radar charts, reviews prioritised recommendations, and exports readiness reports.
-2. **Stakeholder / Employee**: Organisational staff invited by the Admin who authenticate via email and secure passcodes to complete assessments and view their individual readiness profiles—with strict privacy guarantees protecting individual response confidentiality.
+- **Assess maturity.** Rate 30 criteria across six dimensions: leadership, communication, requirements, readiness, training, and resilience. Optional evidence notes do not affect scores.
+- **Plan improvements.** Admins set targets, see the largest shortfalls first, and get a rule-based improvement roadmap. Each submitted baseline keeps its own target snapshot. Admins can print a report or save it as PDF.
+- **Track participation without seeing individual results.** Invited stakeholders complete their own assessment and see their own results. Admins can see names and participation status, not stakeholder answers, notes, or scores.
+- **Resume a draft after an interruption.** The production PWA saves drafts locally. Users can opt in to offline restart recovery on a private browser profile for seven days. Sync and submission require online session verification. See [offline behaviour](MATURITY-PLANNING.md#offline-behaviour).
 
----
+### Worked example
 
-## 🚀 Key Features
+The instrument uses five ratings from 1 to 5 per dimension. Each dimension is scored as the sum of its ratings divided by 25, expressed as a percentage. The overall score is the equally weighted mean of the six dimension scores. The fictional example above scores **61.33% (Managed)**; its **48%** resilience score is **32 percentage points** below an illustrative **80%** target. Targets do not change the maturity score or band. See [scoring and gap analysis](MATURITY-PLANNING.md#scoring-and-gap-analysis) for the exact bands and provisional priority rules.
 
-- **Six-Dimension Assessment Engine**: Evaluates readiness across 6 dimensions with 5 core questions per dimension (30 core items) using a 5-point Likert-style weighted scale.
-- **Mathematical Scoring & 5-Level Maturity Model**: Dynamic dimension calculation ($D_j = \frac{\sum r_{ij}}{5n_j} \times 100$) and weighted overall maturity ($M = \sum w_j D_j$) mapped across 5 stages: *Initial*, *Developing*, *Defined*, *Managed*, and *Optimising*.
-- **Privacy & Anonymisation by Design**: Clear separation between participant tracking (invited, started, completed) and response data. Admins cannot view identifiable stakeholder answers.
-- **PWA & Local Drafts**: The production app caches the interface and saves drafts in IndexedDB. Users can opt in on a private device to reopen a saved assessment after a restart while still offline. Sync and submission wait for online session verification. See [offline recovery](MATURITY-PLANNING.md#offline-behaviour).
-- **Role-Based Portals**:
-  - **Admin Portal**: 2-stage organisation onboarding, assessment dashboard, stakeholder invitation & participation tracking, historical assessment timeline, maturity radar charts, and recommendation actions.
-  - **Stakeholder Portal**: Simplified, distraction-free assessment environment with progress tracking, non-linear navigation, review stage, and personal readiness results.
-- **Targets & Gap Analysis**: Admins set optional per-dimension targets. Each new Admin baseline captures the targets in effect at submission, so historical gaps remain comparable.
-- **Recommendations & Reporting**: A rule-based roadmap prioritises target shortfalls and flags weak continuity practices. An Admin can print the selected baseline or save it as PDF from the browser. The guidance and gap priority thresholds are provisional.
+## Run locally
 
----
+Use Node.js 24 and the pnpm version pinned in [`package.json`](package.json). From the repository root:
 
-## 🏗️ Architecture & Monorepo Structure
-
-The project is structured as a modern TypeScript monorepo managed with **pnpm workspaces**:
-
-```text
-uccmmm-assessment-toolkit/
-├── apps/
-│   └── web/                         # Primary Vite + React PWA client application
-│       ├── public/                  # Static assets (SVGs, preview graphics, manifest)
-│       ├── src/
-│       │   ├── components/          # Reusable UI components (AppShell, StatCard, etc.)
-│       │   ├── data/                # Assessment dimensions, questions, templates
-│       │   ├── lib/                 # Storage (IndexedDB), scoring, Supabase client
-│       │   ├── pages/               # Route views (Auth, Dashboard, Assessment, Results, etc.)
-│       │   ├── main.tsx             # Application bootstrap & router configuration
-│       │   └── styles.css           # Tailwind CSS & design system tokens
-│       ├── package.json
-│       └── vite.config.ts           # Vite + PWA configuration
-├── packages/
-│   └── contracts/                   # Shared schemas, domain types, and Zod validators
-│       ├── src/
-│       │   └── index.ts             # Domain models, auth schemas, scoring types
-│       └── package.json
-├── MATURITY-PLANNING.md             # Scoring, targets, and validation notes
-├── GUIDE.md                         # Developer & Architecture Guide
-├── PLAN.md                          # Implementation Plan, Gap Analysis & Roadmap
-├── PROMPT.md                        # Master Development Prompt & Technical Specification
-├── SETUP.md                         # Step-by-step local machine setup guide
-├── package.json                     # Monorepo root configuration
-└── pnpm-workspace.yaml              # Workspace configuration
+```sh
+pnpm install --frozen-lockfile
+pnpm dev
 ```
 
----
+Open [localhost:5173](http://localhost:5173). Without Supabase settings, the development server runs in **demo mode**: choose Admin or Stakeholder and use a test email and a password of at least eight characters. Data stays in this browser and no invitation emails are sent. To use real accounts, follow the [Supabase setup](SETUP.md#6-connect-a-supabase-project).
 
-## 🛠️ Technology Stack
+## Repository map
 
-| Layer | Technology | Purpose |
-| :--- | :--- | :--- |
-| **Framework & Tooling** | [React 19](https://react.dev/), [Vite 7](https://vitejs.dev/) | High-performance SPA with fast HMR |
-| **Language** | [TypeScript 5](https://www.typescriptlang.org/) | Strict type safety across contracts and UI |
-| **Styling & Design** | [Tailwind CSS 4](https://tailwindcss.com/) | Design-token-driven styling matching Figma |
-| **Routing** | [React Router 7](https://reactrouter.com/) | Client-side routing with role-based protections |
-| **Forms & Validation** | [React Hook Form](https://react-hook-form.com/), [Zod](https://zod.dev/) | High-performance form state & schema validation |
-| **Persistence & Auth** | [Supabase](https://supabase.com/) | PostgreSQL, Row-Level Security (RLS), & Auth |
-| **Offline Storage** | [IndexedDB](https://developer.mozilla.org/en-US/docs/Web/API/IndexedDB_API) via [`idb`](https://github.com/jakearchibald/idb) | Local client-side autosave for assessments |
-| **PWA Capabilities** | [`vite-plugin-pwa`](https://vite-pwa-org.netlify.app/) | Service worker, caching strategies, manifest |
-| **Testing** | [Vitest](https://vitest.dev/), [Testing Library](https://testing-library.com/) | Unit, contract, and UI component testing |
-| **Database regression tests** | PostgreSQL (`psql`) | Migration, scoring, and row-level access checks |
+| Path | What it contains |
+| --- | --- |
+| [`apps/web`](apps/web) | React/Vite PWA, role-based UI, and IndexedDB draft storage |
+| [`packages/contracts`](packages/contracts) | Questionnaire, domain schemas, scoring, and recommendation rules |
+| [`supabase`](supabase) | Postgres migrations, access policies, invitation functions, and SQL regression checks |
+| [`vercel.json`](vercel.json) | Static hosting configuration and SPA routes |
 
----
+### Verify a change
 
-## 📊 Scoring Model Summary
+```sh
+pnpm typecheck
+pnpm lint
+pnpm -r test --maxWorkers=1
+pnpm --filter @assessment/web demo:test
+pnpm build
+```
 
-The scoring engine implements the academic formulas summarised in [Maturity planning](MATURITY-PLANNING.md):
+The GitHub Actions workflow runs these checks without hosted credentials. For database and live deployment checks, see [Supabase deployment](supabase/README.md) and the [presentation checklist](PRESENTATION.md#release-sign-off).
 
-### 1. Dimension Score ($D_j$)
-$$D_j = \frac{\sum_{i=1}^{n_j} r_{ij}}{5n_j} \times 100$$
-- $r_{ij} \in [1, 5]$: Response value selected for item $i$ in dimension $j$.
-- $n_j = 5$: Number of core questions in dimension $j$.
-- Range: $20\% - 100\%$.
+## Project status
 
-### 2. Overall Maturity Score ($M$)
-$$M = \sum_{j=1}^{6} w_j D_j$$
-- $w_j = 1/6$ in `uccmm-v1`, so the overall score is the mean of the six dimension scores.
+This is the software artefact for Omoyayi Ajibola’s Master’s project at MIVA Open University. The recommendation content and priority thresholds are provisional; software tests are not a substitute for Delphi review, a practitioner case study, or user acceptance testing. See [maturity planning and validation notes](MATURITY-PLANNING.md#verification-and-remaining-work) for what still needs validation.
 
-### 3. Five Maturity Levels
-1. **Initial**
-2. **Developing**
-3. **Defined**
-4. **Managed**
-5. **Optimising**
-
-All completed assessments are versioned and stored immutably to guarantee historical data integrity.
-
----
-
-## 💻 Getting Started
-
-### Prerequisites
-- **Node.js**: v24 recommended
-- **pnpm**: use the version pinned in `package.json`.
-
-### Installation & Setup
-
-1. **Clone the repository**:
-   ```bash
-   git clone https://github.com/theolujay/uccmmm-assessment-toolkit.git
-   cd uccmmm-assessment-toolkit
-   ```
-
-2. **Install dependencies**:
-   ```bash
-   pnpm install
-   ```
-
-3. **Configure environment variables**:
-   Copy `apps/web/.env.example` to `apps/web/.env.local` to connect Supabase, or leave it unset for local demo mode:
-   ```env
-   VITE_SUPABASE_URL=your-supabase-url
-   VITE_SUPABASE_ANON_KEY=your-supabase-anon-key
-   ```
-
-4. **Start the development server**:
-   ```bash
-   pnpm dev
-   ```
-   Open [http://localhost:5173](http://localhost:5173) in your browser.
-
----
-
-## 📜 Available Scripts
-
-| Command | Description |
-| :--- | :--- |
-| `pnpm dev` | Starts the Vite development server with HMR |
-| `pnpm build` | Compiles contracts and builds the web application for production |
-| `pnpm typecheck` | Executes TypeScript type checking across all workspace packages |
-| `pnpm lint` | Runs ESLint across all projects |
-| `pnpm test` | Runs unit and contract tests using Vitest |
-
----
-
-## 📚 Further Documentation
-
-- **[Developer & Architecture Guide (GUIDE.md)](GUIDE.md)**: Deep dive into architectural patterns, data flow, scoring engine, privacy design, and offline PWA handling.
-- **[Master Implementation Plan (PLAN.md)](PLAN.md)**: Comprehensive repository assessment, gap analysis against newly-added docs, and milestone roadmap.
-- **[Master Development Prompt (PROMPT.md)](PROMPT.md)**: Authoritative technical specifications, Figma fidelity guidelines, and operational prompts.
-- **[Local Setup Guide (SETUP.md)](SETUP.md)**: Local development and Supabase setup.
-- **[Presentation briefing (PRESENTATION.md)](PRESENTATION.md)**: Vercel deployment, repeatable staging demo, and report/slide updates.
-- **[Maturity planning](MATURITY-PLANNING.md)**: Scoring, target and roadmap rules, and remaining validation work.
+Software license: [Apache 2.0](LICENSE).

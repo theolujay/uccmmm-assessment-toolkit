@@ -1,6 +1,6 @@
 # UCCMM Assessment Toolkit — Master Development Prompt & Technical Specification
 
-> **Operational Directive**: This document serves as the master prompt and technical specification for all engineers and AI assistants developing the **UCCMM Assessment Toolkit**. It harmonizes the 47 sections of the Master Development Prompt with the UCCMM Scoring Specification.
+> **Historical design brief.** This records earlier requirements, some of which differ from the current app. Refer to the [README](README.md) and [current roadmap](PLAN.md) for implementation status.
 
 ---
 

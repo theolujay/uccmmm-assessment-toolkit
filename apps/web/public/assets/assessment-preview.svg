@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 552" role="img" aria-labelledby="title desc">
+  <title id="title">UC-CMMM worked example</title>
+  <desc id="desc">Fictional baseline: 61.33% overall, Managed. Six dimension scores: leadership 76%, communication 64%, requirements 60%, readiness 52%, training 68%, and resilience 48%. Resilience is 32 percentage points below its 80% target.</desc>
+  <rect width="880" height="552" rx="24" fill="#f1f5fa"/>
+  <g font-family="system-ui, sans-serif" fill="#102239">
+    <rect x="24" y="24" width="832" height="102" rx="18" fill="#142a49"/>
+    <text x="48" y="61" font-size="15" font-weight="700" letter-spacing="1.5" fill="#a8caf3">FICTIONAL WORKED EXAMPLE</text>
+    <text x="48" y="99" font-size="30" font-weight="700" fill="#fff">Maturity profile</text>
+    <rect x="24" y="146" width="494" height="382" rx="18" fill="#fff"/>
+    <text x="48" y="183" font-size="22" font-weight="700">Dimension scores</text>
+    <g font-size="17" font-weight="600">
+      <text x="48" y="221">Leadership</text><text x="492" y="221" text-anchor="end">76%</text>
+      <text x="48" y="270">Communication</text><text x="492" y="270" text-anchor="end">64%</text>
+      <text x="48" y="319">Requirements</text><text x="492" y="319" text-anchor="end">60%</text>
+      <text x="48" y="368">Readiness</text><text x="492" y="368" text-anchor="end">52%</text>
+      <text x="48" y="417">Training</text><text x="492" y="417" text-anchor="end">68%</text>
+      <text x="48" y="466">Resilience</text><text x="492" y="466" text-anchor="end">48%</text>
+    </g>
+    <g fill="#e4edf8">
+      <rect x="48" y="231" width="444" height="8" rx="4"/>
+      <rect x="48" y="280" width="444" height="8" rx="4"/>
+      <rect x="48" y="329" width="444" height="8" rx="4"/>
+      <rect x="48" y="378" width="444" height="8" rx="4"/>
+      <rect x="48" y="427" width="444" height="8" rx="4"/>
+      <rect x="48" y="476" width="444" height="8" rx="4"/>
+    </g>
+    <g fill="#2865b4">
+      <rect x="48" y="231" width="337.44" height="8" rx="4"/>
+      <rect x="48" y="280" width="284.16" height="8" rx="4"/>
+      <rect x="48" y="329" width="266.4" height="8" rx="4"/>
+      <rect x="48" y="378" width="230.88" height="8" rx="4"/>
+      <rect x="48" y="427" width="301.92" height="8" rx="4"/>
+      <rect x="48" y="476" width="213.12" height="8" rx="4" fill="#b85e13"/>
+    </g>
+    <rect x="538" y="146" width="318" height="174" rx="18" fill="#fff"/>
+    <text x="562" y="182" font-size="17" font-weight="600">Overall maturity</text>
+    <text x="562" y="239" font-size="49" font-weight="750">61.33%</text>
+    <rect x="562" y="258" width="102" height="32" rx="16" fill="#e1edfb"/>
+    <text x="613" y="280" font-size="15" font-weight="700" text-anchor="middle" fill="#1d4e89">Managed</text>
+    <rect x="538" y="340" width="318" height="188" rx="18" fill="#fff5e8"/>
+    <text x="562" y="377" font-size="17" font-weight="700" fill="#803d0d">Largest target gap</text>
+    <text x="562" y="421" font-size="29" font-weight="750">32 pp</text>
+    <text x="562" y="455" font-size="17" fill="#344563">Resilience: 48% vs 80% target</text>
+    <text x="562" y="486" font-size="15" fill="#344563">Example priority: high</text>
+  </g>
+</svg>

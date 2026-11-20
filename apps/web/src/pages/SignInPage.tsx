@@ -36,7 +36,7 @@ export function SignInPage() {
     <section className="auth-banner">
       <img className="banner-curve" src={asset('ellipse.svg')} alt="" />
       <div className="banner-text"><h1>User-Centred Change Management Maturity Model Assessment Toolkit</h1><p>The UC-CMMM Toolkit helps IT leaders assess organisational change management maturity and gives employees a personal readiness score.</p></div>
-      <img className="product-preview" src={asset('login-preview.png')} alt="Assessment dashboard preview" />
+      <img className="product-preview" src={asset('assessment-preview.svg')} alt="Fictional maturity profile: 61.33% overall (Managed), with resilience 32 percentage points below its target." />
     </section>
     <section className="auth-content">
       <form className="auth-card" onSubmit={handleSubmit(submit)}>

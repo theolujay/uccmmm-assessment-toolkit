@@ -6,12 +6,17 @@ dist/
 .env.*
 !.env.example
 supabase/.temp/
+supabase/.branches/
 Assessment Toolkit/
 docs/
-GUIDE.md
-likely-questions.md
-maturity-classification.md
-PROMPT.md
-prompt1.md
-PRESENTATION.md
+
+# Local research and planning material
+/Project Omoyayi Ajibola.pdf
+/GUIDE.md
+/PROMPT.md
+/PLAN.md
+/likely-questions.md
+/maturity-classification.md
+/prompt1.md
+
 .vercel/

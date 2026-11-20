@@ -1,64 +1,15 @@
-# UCCMM Assessment Toolkit — Local Setup
+# UC-CMMM Assessment Toolkit — setup and deployment
 
-## 1. Install the prerequisites
+## Run the local demo
 
-Install these two applications:
+Install [Node.js 24](https://nodejs.org/) and the [pnpm](https://pnpm.io/installation) version pinned in `package.json`. With Corepack available, run `corepack enable pnpm` to use the pinned version. From the repository root:
 
-- [Node.js 24](https://nodejs.org/) (recommended)
-- [pnpm](https://pnpm.io/installation) (use the version pinned in `package.json`)
-
-Or run the following on Windows:
-
-```powershell
-# Download and install Chocolatey:
-powershell -c "irm https://community.chocolatey.org/install.ps1|iex"
-
-# Download and install Node.js:
-choco install nodejs --version="24.20.0"
-
-# Verify the Node.js version:
-node -v # Should print "v24.20.0".
-
-# Download and install pnpm:
-corepack enable pnpm
-
-# Verify pnpm version:
-pnpm -v
-```
-
-## 2. Open the project
-
-Open a terminal and run:
-
-```powershell
-Set-Location # path to the project: something like `/Documents/ChatGPT/...`
-```
-
-## 3. Install the project
-
-Run this once:
-
-```bash
-pnpm install
-```
-
-## 4. Start the project
-
-Run:
-
-```bash
+```sh
+pnpm install --frozen-lockfile
 pnpm dev
 ```
 
-## 5. Open the app
-
-Open this address in your browser:
-
-```text
-http://localhost:5173
-```
-
-Keep the terminal window open while using the app. Press `Ctrl+C` in the terminal to stop it.
+Open [localhost:5173](http://localhost:5173). Press `Ctrl+C` in the terminal to stop the dev server.
 
 Without Supabase credentials, local development opens in demo mode and stores assessment progress in this browser. Demo invitations do not send email. Use test data only.
 
@@ -103,9 +54,10 @@ In **Authentication → URL Configuration**, set the Site URL to `http://localho
 
 The hosted Edge runtime supplies `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY`; do not enter them as custom secrets. This configures **stakeholder invitations**. Admin signup confirmations and password resets are separate and use Supabase Auth’s email settings.
 
+From the repository root, deploy both functions to the linked hosted project:
+
 ```bash
-npx supabase functions deploy invite-stakeholder
-npx supabase functions deploy manage-stakeholder
+npx supabase functions deploy invite-stakeholder manage-stakeholder --remote
 ```
 
 Verify that an Admin can sign in and submit a test assessment, then invite a stakeholder and sign in separately to check participation and privacy.
