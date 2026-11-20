@@ -7,5 +7,6 @@
 supabase/.temp/
 Assessment Toolkit/
 docs/
+local-research/
 **/*.pdf
 **/*.patch
